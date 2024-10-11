@@ -10,7 +10,7 @@ The simulation begins with default shapefile, however users can input shapefiles
 The code is written in a modular style allowing for future feature integration. The code is available here, and we welcome suggestions or collaboration for improving this simulation tool. 
 
 <p align="center">
-  <img src="/assets/images/AnimationLoopDiagram.png" alt="alt text">
+  <img src="../assets/images/AnimationLoopDiagram.png" alt="alt text">
   <br>
    <b>Figure 1.</b> A schematic diagram of the animation loop code, indicating the basic order of steps taken in each iteration of the simulation. </centre>
 </p>
