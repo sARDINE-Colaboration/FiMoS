@@ -1,6 +1,6 @@
 // Include the source file (not sure if the best approach, but it works)
 const script_depth = document.createElement('script');
-script_depth.src = 'depthMapFunctions.js';
+script_depth.src = './js/depthMapFunctions.js';
 document.head.appendChild(script_depth);
 
 // Get the canvas element
@@ -1572,5 +1572,5 @@ console.log("Result of draw_state_parameter_array:", arraytest);
 console.log("Result of draw_state_parameter_from_array:", draw_state_parameter_from_array(arraytest, 0));
  */
 // Start animation loop for fish
-InitialGeoJSONFile("Most_shoreline_polygon_UTM33.geojson");
+InitialGeoJSONFile("../data/Most_shoreline_polygon_UTM33.geojson");
 animateFish();
