@@ -7,9 +7,8 @@
 
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <link rel="stylesheet" href="./assets/index.css">
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 
-
-</head>
 
 <section class="hero">
     <div class="hero-body" style="padding-bottom: 1rem">
@@ -41,6 +40,7 @@
     </div>
   </section>
 
+
     <!-- New Text Sections Below -->
     <section class="info-section">
         <div class="container is-max-desktop">
@@ -59,23 +59,71 @@
 
             <!-- Controls Section -->
             <div class="info-block">
+                <h2 class="info-header">Instructions2</h2>
+                <p>
+                When \(a \ne 0\), there are two solutions to \(ax^2 + bx + c = 0\) and they are
+                \[x = {-b \pm \sqrt{b^2-4ac} \over 2a}.\]
+                </p>
+            </div>
+
+            <!-- Controls Section -->
+            <div class="info-block">
                 <h2 class="info-header">Instructions</h2>
                 <p>Describe gui here.</p>
             </div>
 
-            <!-- Markdown Section -->
+            <!-- general design sectino -->
             <section class="markdown-section">
-              <div class="container is-max-desktop">
-                <div class="info-block">
-                  <h2 class="info-header">Markdown Section</h2>
-                  <div class="markdown-content">
-                    <!-- Load Markdown File -->
-                    <div id="markdown-content"></div>
+              <div class="info-block">
+                <!-- <h2 class="info-header">Markdown Section</h2> -->
+                <div class="markdown-content">
+                  <!-- Load Markdown File -->
+                  <div id="markdown-content"></div>
 
-                    <!-- Include the Marked.js library -->                 
-                   
-                    </script>
-                  </div>
+                  <script src="https://cdn.jsdelivr.net/npm/marked@3.0.7/marked.min.js"></script>
+                  <script>
+                    document.addEventListener("DOMContentLoaded", function() {
+                      fetch('./docs/method_general.md')
+                        .then(response => response.text())
+                        .then(text => {
+                          document.getElementById('markdown-content').innerHTML = marked(text);
+                        });
+                    });
+                  </script>
+
+                </div>
+              </div>
+            </section>
+
+            <!-- METHOD movement section -->
+            <section class="markdown-section">
+              <div class="info-block">
+                <!-- <h2 class="info-header">Markdown Section</h2> -->
+                <div class="markdown-content">
+                  <!-- Load Markdown File -->
+                  <div id="markdown-content2"></div>
+
+                  <!-- this script enables mathjax with an older version -->
+                  <!--
+                  <script type="text/x-mathjax-config">
+                    MathJax.Hub.Config({tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]}});
+                  </script>
+                  <script type="text/javascript"
+                  src="http://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.6/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
+                  </script>
+                  -->
+
+                  <script>
+                    document.addEventListener("DOMContentLoaded", function() {
+                      fetch('./docs/method_movement.md')
+                        .then(response => response.text())
+                        .then(text => {
+                          document.getElementById('markdown-content2').innerHTML = marked.parse(text);
+                        });
+                    });
+                    MathJax.typeset();
+                  </script>
+
                 </div>
               </div>
             </section>
