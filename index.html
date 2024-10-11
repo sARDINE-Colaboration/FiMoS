@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>FishBehavStateSim</title>
+
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <link rel="stylesheet" href="./index.css">
+
+
+</head>
+
+<section class="hero">
+    <div class="hero-body" style="padding-bottom: 1rem">
+      <div class="container is-max-desktop">
+        <div class="columns is-centered">
+          <div class="column has-text-centered">
+            <h1 class="title is-1 publication-title">Interactively Simulating Fish Behavioural States</h1>
+          
+            <!-- SVG image -->
+            <div class="svg-container"> 
+                <img src="SimAppHeader.svg" alt="Nice image under title">
+            </div>
+
+            <div class="Simulation-link">
+                <span class="link-block">
+                    <a href="./Behaviour_Simulater.html" class="rounded-button">
+                    <span class="icon">
+                      <i class="fas fa-play"></i>
+                    </span>
+                    <span>Simulate</span>
+                  </a>
+                </span>
+            </div>
+
+          </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+    <!-- New Text Sections Below -->
+    <section class="info-section">
+        <div class="container is-max-desktop">
+            <!-- About Section -->
+            <div class="info-block">
+                <h2 class="info-header">What does this do?</h2>
+                <p>This application generates fish trajectories from self-propelled agents bounded within a waterbody. 
+                    The agent's movement is driven by a set of forces acting on them which affect their velocity vectors. 
+                    The parameters controlling the forces are determined by the behavioural state, which is updated according to markov process. 
+                    The trajectories of the fish agents can be downloaded with labelled parameter states. 
+                    The motivation is this simulated data can be used to evaluate and train models classifying behavioural states from trajectories.
+                    Visual feedback in the application is valuable for understanding how the states behave. 
+                    The simulation code is open-source.
+                </p>
+            </div>
+
+            <!-- Controls Section -->
+            <div class="info-block">
+                <h2 class="info-header">Instructions</h2>
+                <p>Describe gui here.</p>
+            </div>
+
+            <!-- Markdown Section -->
+            <section class="markdown-section">
+              <div class="container is-max-desktop">
+                <div class="info-block">
+                  <h2 class="info-header">Markdown Section</h2>
+                  <div class="markdown-content">
+                    <!-- Load Markdown File -->
+                    <div id="markdown-content"></div>
+
+                    <!-- Include the Marked.js library -->                 
+                   
+                    </script>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            <!-- How it Works Section -->
+            <div class="info-block">
+                <h2 class="info-header">How it works</h2>
+                <p>This section outlines the underlying mechanics of the simulation, describing the algorithms, models, and data used to simulate fish behaviour accurately.</p>
+            </div>
+        </div>
+    </section>
+
+</html>

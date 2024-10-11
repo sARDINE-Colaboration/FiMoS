@@ -1,0 +1,79 @@
+body {
+    font-family: 'Noto Sans', sans-serif;
+    background-color: #076b85;
+  }
+
+.container {
+    /*max-width: 1080px*/
+}
+  
+.hero-body{
+    color: #002b36;
+    font-size: 44px;
+    padding: 10px;
+    margin: 10px;
+    text-align: center;
+}
+
+.svg-container {
+    margin-top: 20px; /* Adds some space between the header and SVG */
+    text-align: center; /* Centers the SVG within the container */
+}
+
+.svg-container svg {
+    max-width: 100%; /* Ensures SVG scales responsively */
+    height: auto; /* Maintains aspect ratio */
+}
+
+.simulation-link {
+    margin-top: 20px; /* Space between SVG and button */
+}
+
+.rounded-button {
+    display: inline-flex; /* Ensures icon and text are aligned */
+    align-items: center;
+    padding: 10px 20px; /* Padding around text and icon */
+    font-size: 16px;
+    color: white; /* Text color */
+    background-color: #002b36; /* Button background color */
+    border-radius: 25px; /* Rounded edges */
+    text-decoration: none; /* Remove underline from link */
+    transition: background-color 0.3s ease; /* Smooth transition for hover effect */
+}
+
+.rounded-button:hover {
+    background-color: #000a0d; /* Darker color on hover */
+}
+
+.rounded-button .icon {
+    margin-right: 8px; /* Space between icon and text */
+    font-size: 20px; /* Adjust icon size */
+}
+
+.info-section {
+    padding: 20px 0; /* Adds space around the info section */
+    background-color: #f4f4f4; /* Light background color for contrast */
+}
+
+.info-block {
+    padding: 20px;
+    margin: 20px auto; /* Centers and adds space between blocks */
+    max-width: 800px; /* Controls the width of each block */
+    background-color: white; /* Block background color */
+    border-radius: 8px; /* Rounded corners */
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1); /* Subtle shadow for depth */
+}
+
+.info-header {
+    font-size: 24px; /* Header font size */
+    color: #002b36; /* Header text color */
+    margin-bottom: 10px; /* Space below header */
+    text-align: center; /* Center align the headers */
+}
+
+.info-block p {
+    font-size: 16px; /* Paragraph font size */
+    line-height: 1.6; /* Line height for readability */
+    color: #333; /* Paragraph text color */
+    text-align: justify; /* Justify text for clean alignment */
+}

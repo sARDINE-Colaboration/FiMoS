@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Behaviour Simulations</title>
+  <script src="turf.min.js" charset="utf-8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lil-gui@0.19"></script>
+  <script>
+  var GUI = lil.GUI;
+  </script>
+  <style>
+
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background-color: #076b85;
+    }
+
+    .canvas-container {
+      display: flex;
+      flex-direction: column; /* Stack canvases vertically */
+      align-items: center; /* Center them horizontally */
+    }
+
+    canvas {
+      background-color: black;
+      padding: 20px;
+      border-radius: 8px; /* Rounded corners */
+      box-shadow: 0 20px 20px rgba(0, 0, 0, 0.5); /* Subtle shadow for depth */
+    }
+
+    #HUDCanvas {
+      margin-top: -10px; /* Overlap trailCanvas by 10px */
+    }
+
+    .lil-gui {
+	  --background-color: #002b36;
+	  --text-color: #b2c2c2;
+	  --title-background-color: #001f27;
+	  --title-text-color: #b2c2c2;
+  	--widget-color: #094e5f;
+    --hover-color: #0a6277;
+	  --focus-color: #76d2e9;
+  	--number-color: #2aa0f2;
+	  --string-color: #97ad00;
+}  
+
+.logo {
+            position: absolute;
+            top: 10px; /* Adjust top position */
+            left: 10px; /* Adjust left position */
+            width: 15vw; /* Adjust width as needed */
+            height: auto; /* Maintain aspect ratio */
+            z-index: 10; /* Ensure it stays above other elements */
+        }
+    
+  </style>  
+</head>
+<body>
+  <img src="SimAppHeader.svg" alt="Logo" class="logo">
+  <div class="canvas-container">
+    <canvas id="trailCanvas"></canvas>
+    <canvas id="HUDCanvas"></canvas>
+  </div>
+  <script src="Behaviour_simulater.js"></script>
+</body>
+
+</html>
