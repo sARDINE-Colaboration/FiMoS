@@ -94,7 +94,8 @@
                       fetch('./docs/method_general.md')
                         .then(response => response.text())
                         .then(text => {
-                          document.getElementById('markdown-content').innerHTML = marked(text);
+                          const escapedText = text.replace(/\\/g, '\\\\'); // Escape backslashes for LaTeX 
+                          document.getElementById('markdown-content').innerHTML = marked.parse(escapedText);
                         });
                     });
                   </script>
@@ -110,30 +111,6 @@
                 <div class="markdown-content">
                   <!-- Load Markdown File -->
                   <div id="markdown-content2"></div>
-
-                  <!-- this script enables mathjax with an older version -->
-                  <!--
-                  <script type="text/x-mathjax-config">
-                    MathJax.Hub.Config({tex2jax: {inlineMath: [['$','$'], ['\\(','\\)']]}});
-                  </script>
-                  <script type="text/javascript"
-                  src="http://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.6/MathJax.js?config=TeX-AMS-MML_HTMLorMML">
-                  </script>
-                  -->
-
-                  <!--
-                  <script>
-                    document.addEventListener("DOMContentLoaded", function() {
-                      fetch('./docs/method_movement.md')
-                        .then(response => response.text())
-                        .then(text => {
-                          document.getElementById('markdown-content2').innerHTML = marked.parse(text);
-                        }).then(() => {
-                          MathJax.typesetPromise();
-                        });
-                    });
-                  </script>
-                  -->
 
                   <script>
                     document.addEventListener("DOMContentLoaded", function() {
