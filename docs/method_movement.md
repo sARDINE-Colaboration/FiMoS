@@ -76,4 +76,46 @@ In order to prevent a forth and back switching of the signum function due to the
 Of course, the lock is released as soon as no collision is detected anymore $t _{i, \text{col}} > t _c$.
 
 
-The social forces !!!!!!!!!!!!!!!!!!!!MISSING!!!!!!!!!!!!!!!!!!!!
+The social forces are a 2-zone-model (an adaptation of the [3-zone-model](https://www.sciencedirect.com/science/article/pii/S0022519302930651)) according to which an
+individual $i$ is repelled $\mathbf{F} _{i, \text{soc}, r}$ from individuals in its repulsion zone
+or it is attracted and aligns $\mathbf{F} _{i, \text{soc}, \text{a}}$  to individuals are closer than $d _{\text{soc}}$:
+
+$$
+\mathbf{F} _{i, \text{soc}} =
+\begin{cases}
+    \mathbf{F} _{i, \text{soc}, r}  &\text{ if } N _r(i)>0 \ \  &\text{(repulsion)}\\
+    \mathbf{F} _{i, \text{soc}, a}  &\text{ else }              &\text{(attraction + alignment)}
+\end{cases}
+$$
+
+with $N _r (i)$ as the number of neighbors in individuals $i$ repulsion zone that ends at a distance $d_r$.
+The repulsion force is
+
+$$
+\mathbf{F} _{i, \text{soc}, r} 
+= \frac{1}{N _r} \sum _{j \text{ if } d _{ij} < d _r} - \hat{\mathbf{x}} _{ji}
+$$
+
+with $\hat{\mathbf{x}} _{ji} = \frac{ \mathbf{x} _j -  \mathbf{x} _i}{ |\mathbf{x} _j -  \mathbf{x} _i| }$ as the unit direction vector pointing to $j$ from individual $i$.
+The attraction and alignment force decrease linear with distance $f(d) = 1 - \frac{d - d _r}{ d _{\text{soc}} - d _r}$ and are a superposition:
+
+$$
+\mathbf{F} _{i, \text{soc}, a} 
+= \sum _{j \text{ if } d _r \leq d _{ij} < d _{\text{soc}}} f(d _{ij}) 
+    ( \underbrace{\mu _{\text{att}} \hat{\mathbf{x}} _{ji}} _{\text{attraction}} +
+      \underbrace{\mu _{\text{ali}} \mathbf{v} _{ji}} _{\text{alignment}})
+$$
+
+with $\mu _{\text{att}}$ and $\mu _{\text{ali}}$ as attraction and alignment strength,
+and $\mathbf{v} _{ji} = \mathbf{v} _j - \mathbf{v} _i$ as the velocity difference vector.
+
+At the end we make the social forces adaptable to the respective parameter setting, such that fast swimming fish have a larger repulsion and social interaction zone than slow swimming fish by
+
+$$
+\begin{split}
+    d _r (i) &= t _r v _i  = (2 \text{ sec}) v _i\\
+    d _{\text{soc}} (i) &= t _{\text{soc}} v _i = ( 10 \text{ sec}) v _i
+\end{split}
+$$
+
+We argue, that slow swimming fish tend to keep their speed, and will not swim to an individual, that is so far away that it will be likely at another position at the time it arrives there.
