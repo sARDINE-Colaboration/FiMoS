@@ -76,11 +76,11 @@
             </div>
 
 
-            <!-- Controls Section -->
+            <!-- Controls Section 
             <div class="info-block">
                 <h2 class="info-header">Instructions</h2>
                 <p>Describe gui here.</p>
-            </div>
+            </div> -->
 
             <!-- general design sectino -->
             <section class="markdown-section">
@@ -120,6 +120,35 @@
                         .then(text => {
                           const escapedText = text.replace(/\\/g, '\\\\'); // Escape backslashes for LaTeX 
                           document.getElementById('markdown-content2').innerHTML = marked.parse(escapedText);
+
+                          // Wait for MathJax to be fully loaded before typesetting
+                          MathJax.startup.promise.then(() => {
+                            // Reprocess the math after the new content is inserted
+                            MathJax.typeset();
+                          }).catch((err) => console.error("MathJax loading error: ", err));
+                        });
+                    });
+                  </script>
+
+                </div>
+              </div>
+            </section>
+
+             <!-- METHOD behaviour section -->
+             <section class="markdown-section">
+              <div class="info-block">
+                <!-- <h2 class="info-header">Markdown Section</h2> -->
+                <div class="markdown-content">
+                  <!-- Load Markdown File -->
+                  <div id="markdown-content3"></div>
+
+                  <script>
+                    document.addEventListener("DOMContentLoaded", function() {
+                      fetch('./docs/method_behaviours.md')
+                        .then(response => response.text())
+                        .then(text => {
+                          const escapedText = text.replace(/\\/g, '\\\\'); // Escape backslashes for LaTeX 
+                          document.getElementById('markdown-content3').innerHTML = marked.parse(escapedText);
 
                           // Wait for MathJax to be fully loaded before typesetting
                           MathJax.startup.promise.then(() => {
