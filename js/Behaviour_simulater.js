@@ -95,9 +95,9 @@ var substates = [[2]]; // number of initial substates for resting
 // dwell time per state in minutes
 var sojourn_times = [resting_sojourn];  // dwell times for resting, foraging, active
 var transition_probs = [ //only initial
-    [0, 0.8, 0.2],  // probabilities from resting to resting, foraging, active
-    [0.6, 0, 0.4],  // probabilities from foraging to resting, foraging, active
-    [0.2, 0.8, 0]   // probabilities from active to resting, foraging, active
+    [0, 0.5, 0.5],  // probabilities from resting to resting, foraging, active
+    [0.5, 0, 0.5],  // probabilities from foraging to resting, foraging, active
+    [0.5, 0.5, 0]   // probabilities from active to resting, foraging, active
 ];
 function generateTransitionProbs(dimension) {
     var transition_probs = new Array(dimension).fill(0).map(() => new Array(dimension).fill(0));
