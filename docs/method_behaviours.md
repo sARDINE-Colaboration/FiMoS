@@ -4,6 +4,7 @@
 
 We assume the fish to have a repertoire of $K$ behavioral states. The movement parameters vary between states which are defined by the following state-specific parameters
 
+$$
 \begin{itemize}
    
     \item speed relaxation coefficient $ \beta $,
@@ -12,6 +13,7 @@ We assume the fish to have a repertoire of $K$ behavioral states. The movement p
     \item patch attraction strength $ \mu _{\mathrm{patchatt}} $,
     \item social force parameters $ \mu _{\mathrm{att}} $ and $ \mu _{\mathrm{ali}} $, representing attraction and alignment strengths,
 \end{itemize}
+$$
 
 resulting in a parameter vector $\Theta^{(k)}$ for each state $ k \in \{1, \dots, K\} $:
 
