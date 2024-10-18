@@ -118,7 +118,7 @@ function generateTransitionProbs(dimension) {
 function calculateTransitionMatrix(transition_probs, sojourn_times){
     var prob_staying = [];
     for (var state in transition_probs){
-        prob_staying[state] = (1 / sojourn_times[state]) * (1/60);
+        prob_staying[state] = 1 - ((1 / sojourn_times[state]) * (1/60));
     }
     var transition_matrix = [];
     for (var state in transition_probs){
