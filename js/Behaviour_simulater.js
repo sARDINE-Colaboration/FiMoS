@@ -73,9 +73,9 @@ const parameterNames = ['beta', 'v0', 'D_phi', 'D_theta', 'D_v', 'patch_strength
 //each vector of eight values corresponds to five parameters in this order: 
 // beta, v0, D_phi, D_theta, D_v, patch_strength, strength_att, strength_align
 const zero_vector =  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-const resting_vector =  [0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.2, 0.2];
-const foraging_vector = [0.1, 0.4,  0.9, 0.9, 0.8, 0.9, 0.2, 0.2];
-const active_vector =   [0.8, 0.8,  0.1, 0.1, 0.2, 0.5, 0.2, 0.2];
+const resting_vector =  [0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]; // 0.0, 0.2, 0.2];
+const foraging_vector = [0.1, 0.4,  0.9, 0.9, 0.8, 0.0, 0.0, 0.0]; // 0.9, 0.2, 0.2];
+const active_vector =   [0.8, 0.8,  0.1, 0.1, 0.2, 0.0, 0.0, 0.0]; // 0.5, 0.2, 0.2];
 const resting_sojourn = [100]; // time in minutes
 const foraging_sojourn = [30];
 const active_sojourn = [10];
