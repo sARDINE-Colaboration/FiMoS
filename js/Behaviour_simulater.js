@@ -1309,7 +1309,7 @@ const param = {
   geojsonFile: function() {geoJSONFileInput.click()},
   numberOfFish: 0,
   restingState:true,
-  _SubstatesResting: 2, // Use a private variable
+  _SubstatesResting: 1, // Use a private variable
   get SubstatesResting() {
     return this._SubstatesResting;
   },
@@ -1336,7 +1336,7 @@ const param = {
   globalStateStdev: 0.05,
   ssTrack: 1,
   detYield: 100,
-  maxIter: 10000,
+  maxIter: 259200,  // = 3 days * 60 minutes * 60 seconds
   applyPosErr: true,
   download: function() {downloadTracks()},
 };
