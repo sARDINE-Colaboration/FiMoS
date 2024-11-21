@@ -315,6 +315,7 @@ class Fish {
     constructor(id, geojson) {
         this.id = id;
         this.timestamp = [];
+        this.timestamp_states = [];
         this.positions = []; // array of positions at each out_step in PIXELS
         this.states = []; //
         this.parameters = [];
@@ -371,7 +372,8 @@ class Fish {
         this.speed_ms = Math.max(0, randomNormal(this.v0, this.v0 / 4)); // speed in METER / sec
         this._computeVelocity_inPixelPerSec()
         this.positions.push(this.position);
-        this.timestamp.push(1);
+        this.timestamp.push(0);
+        this.timestamp_states.push(0);
         this.states.push(this.state);
         this.parameters.push([this.beta, this.v0, this.D_phi, this.D_theta, this.D_v, this.patch_strength,this.patch_sensing_length, this.strength_att, this.strength_align]);
     }
@@ -448,17 +450,28 @@ class Fish {
         this.velocity = this.velocity.mul_scalar(this.speed_ms * pixel_per_meter);
     }
     draw_and_save_position(max_iter) {
+        const timestamp_now = this.timestamp[this.timestamp.length-1] + 1; 
+
         // save the position
         this.positions.push(this.position);
-        this.timestamp.push(this.timestamp[this.timestamp.length-1] + 1);
-        this.states.push(this.state);
-        this.parameters.push([this.beta, this.v0, this.D_phi, this.D_theta, this.D_v, this.patch_strength,this.patch_sensing_length, this.strength_att, this.strength_align]);
+        this.timestamp.push(timestamp_now);
         
         if (this.positions.length > max_iter) {
             this.positions.shift();
             this.timestamp.shift();
-            this.states.shift();
-            this.parameters.shift();
+        }
+
+        // save the state if state-switch happened
+        if (this.state != this.states[this.states.length-1]) {
+            this.states.push(this.state);
+            this.timestamp_states.push(timestamp_now);
+            this.parameters.push([this.beta, this.v0, this.D_phi, this.D_theta, this.D_v, this.patch_strength,this.patch_sensing_length, this.strength_att, this.strength_align]);
+
+            if ( (timestamp_now - this.timestamp_states[0]) > max_iter) {
+                this.states.shift();
+                this.timestamp_states.shift();
+                this.parameters.shift();
+            }
         }
 
         // Calculate hue value based on fish state
@@ -625,8 +638,8 @@ function animateFish() {
 
     // draw each fish (at output time step dt_output = 1s)
     fishes.forEach(function (fish) {
+        fish.draw_and_save_position(param.maxIter); // important 1. record the position and state according to its past movement 2. switch state
         state_switch(fish); // switch state before updating position
-        fish.draw_and_save_position(param.maxIter);
     });
     time_passed += dt_output;
     time_passed_stamp();
@@ -1249,6 +1262,42 @@ function applyPositioningError(tracks, errorProbHigh, errorSDHigh, errorSDLow) {
     return withError;
 }
 
+function downloadData() {
+    downloadTracks();
+    downloadStates();
+}
+
+function downloadStates() {
+
+    const stateSwitches = fishes.map(fish => {
+        return fish.states.map((state, index) => {
+            return [state, fish.timestamp_states[index],
+                    fish.parameters[index][0], fish.parameters[index][1], fish.parameters[index][2], fish.parameters[index][3], 
+                    fish.parameters[index][4], fish.parameters[index][5], fish.parameters[index][6], fish.parameters[index][7],
+                    fish.parameters[index][8]];
+        });
+    });
+
+    // Create CSV content
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "Fish ID,state,Timestamp,beta,v0,D_phi,D_theta,D_v,patch_strength,patch_dist,social_strength,social_align\n";
+    stateSwitches.forEach((stateRecord, fishIndex) => {
+        stateRecord.forEach(row => {
+            csvContent += (fishIndex + 1) + "," + row[0] + "," + row[1] + "," + row[2] + "," + row[3] + "," + row[4] + "," + row[5] + "," + row[6] + "," + row[7] + "," + row[8] + "," + row[9] + "," + row[10] + "\n";
+        });
+    });
+
+    // Create a link element and trigger download
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "fish_states.csv");
+    document.body.appendChild(link);
+    link.click();
+
+}
+
+
 //needs to be refactored for fish position update
 function downloadTracks() {
     // Rescale fish tracks to original coordinates
@@ -1265,8 +1314,7 @@ function downloadTracks() {
     const rescaledTracks = fishes.map(fish => {
         return fish.positions.map((position, index) => {
             const originalCoord = rescaleToGeoJSON(position[0], position[1]);
-            return [originalCoord[0], originalCoord[1], position[2], fish.timestamp[index], fish.states[index], 
-                    fish.parameters[index][0],fish.parameters[index][1],fish.parameters[index][2],fish.parameters[index][3],fish.parameters[index][4],fish.parameters[index][5],fish.parameters[index][6],fish.parameters[index][7],fish.parameters[index][8]];
+            return [originalCoord[0], originalCoord[1], position[2], fish.timestamp[index]];
         });
     });
 
@@ -1286,10 +1334,10 @@ function downloadTracks() {
 
     // Create CSV content
     let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Fish ID,X,Y,Z,Timestamp,State,beta,v0,D_phi,D_theta,D_v,patch_strength,patch_dist,social_strength,social_align\n";
+    csvContent += "Fish ID,X,Y,Z,Timestamp\n";
     processedTracks.forEach((track, fishIndex) => {
         track.forEach(row => {
-            csvContent += (fishIndex + 1) + "," + row[0] + "," + row[1] + "," + row[2] + "," + row[3] + "," + row[4] + "," + row[5] + "," + row[6] + "," + row[7] + "," + row[8] + "," + row[9] + "," + row[10] + "," + row[11] + "," + row[12] + "," + row[13] + "\n";
+            csvContent += (fishIndex + 1) + "," + row[0] + "," + row[1] + "," + row[2] + "," + row[3] + "\n";
         });
     });
 
@@ -1336,9 +1384,9 @@ const param = {
   globalStateStdev: 0.05,
   ssTrack: 1,
   detYield: 100,
-  maxIter: 259200,  // = 3 days * 60 minutes * 60 seconds
+  maxIter: 43200,  // = 12 hours * 60 minutes * 60 seconds
   applyPosErr: true,
-  download: function() {downloadTracks()},
+  download: function() {downloadData()},
 };
 
 
@@ -1548,7 +1596,7 @@ gui.add({ addCustomState: addCustomState }, 'addCustomState').name('Add custom s
 gui.add(param, 'globalStateStdev').name('Behavioural variation');
 gui.add(param, 'ssTrack').name('Subsample track (s)');
 gui.add(param, 'detYield').name('Detection yield (%)');
-gui.add(param, 'maxIter').name('Max. track length');
+gui.add(param, 'maxIter').name(`Max. track length (${dt_output} s)`);
 gui.add(param, 'applyPosErr').name('Apply position error (y/n)');
 gui.add(param, "download").name('Download tracks');
 geoJSONFileInput.addEventListener('change', handleGeoJSONFile);
