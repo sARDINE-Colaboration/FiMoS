@@ -118,7 +118,7 @@ function generateTransitionProbs(dimension) {
 function calculateTransitionMatrix(transition_probs, sojourn_times){
     var prob_staying = [];
     for (var state in transition_probs){
-        prob_staying[state] = 1 - ((1 / sojourn_times[state]) * (1/60));
+        prob_staying[state] = 1 - (1 / (sojourn_times[state] * 60 / dt_output)); // sojourn time in dt_output units
     }
     var transition_matrix = [];
     for (var state in transition_probs){
@@ -627,8 +627,8 @@ function animateFish() {
     fishes.forEach(function (fish) {
         state_switch(fish); // switch state before updating position
         fish.draw_and_save_position(param.maxIter);
-        time_passed += dt_output;
     });
+    time_passed += dt_output;
     time_passed_stamp();
     drawScaleBar();
 
