@@ -76,9 +76,9 @@ const zero_vector =  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 const resting_vector =  [0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]; // 0.0, 0.2, 0.2];
 const foraging_vector = [0.1, 0.4,  0.9, 0.9, 0.8, 0.0, 0.0, 0.0]; // 0.9, 0.2, 0.2];
 const active_vector =   [0.8, 0.8,  0.1, 0.1, 0.2, 0.0, 0.0, 0.0]; // 0.5, 0.2, 0.2];
-const resting_sojourn = [100]; // time in minutes
-const foraging_sojourn = [30];
-const active_sojourn = [10];
+const resting_sojourn = [20]; // time in minutes (initially 100)
+const foraging_sojourn = [20]; // initially 30 
+const active_sojourn = [20]; // initially 30
 
 // create a matrix with all available state vectors
 let all_states = ['resting', 'foraging', 'active'];
