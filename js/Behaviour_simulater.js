@@ -1502,7 +1502,7 @@ function adjustStateParameters(folder, state) {
     let adjustedSojourn = all_sojourn_times[state][0];
     console.log("Adding sojournTime to folder:", adjustedSojourn);
     folder.add({ sojournTime: adjustedSojourn }, 'sojournTime')
-        .name('Sojourn Time')
+        .name('Sojourn Time (Min)')
         .onChange((newValue) => {
             const parsedValue = parseFloat(newValue);
             if (!isNaN(parsedValue)) {
