@@ -1221,6 +1221,7 @@ function pointInsidePolygon(point, polygon) {
 
 // Function to subsample fish tracks
 function subsampleTracks(tracks, ssTrackpar) {
+    // PPK-Note (ToDo): it should be (ssTrackpar <= dt_output), currently it is ok since dt_output = 1....
     if (ssTrackpar <= 1) {
         return tracks;
     } else {
@@ -1326,7 +1327,7 @@ function downloadTracks() {
             console.log("checked!");
             subsampledTrack = applyPositioningError(subsampledTrack, 0.97, 2, 50);
         }
-        return applyPositioningError(subsampledTrack);
+        return subsampledTrack;
     });
 
     // Remove undefined tracks
@@ -1385,7 +1386,7 @@ const param = {
   ssTrack: 1,
   detYield: 100,
   maxIter: 43200,  // = 12 hours * 60 minutes * 60 seconds
-  applyPosErr: true,
+  applyPosErr: false,
   download: function() {downloadData()},
 };
 
