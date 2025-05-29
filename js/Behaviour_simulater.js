@@ -795,52 +795,11 @@ function handleGeoJSONFile(event) {
         try {
             geojson = JSON.parse(result);
             geojson_origScale = JSON.parse(result);
-            console.log(geojson_origScale);
-            //convert to LineString
-            // Convert geometry to LineString if it's not already
-            if (geojson.features.length > 0 && geojson.features[0].geometry.type !== 'LineString') {
-                const coordinates = geojson.features[0].geometry.coordinates[0]; //it is important to have this 0 at then end for loaded
-                geojson.features[0].geometry = {
-                    type: 'LineString',
-                    coordinates: coordinates
-                };
-            }
-            // TODO:
-            // * reduce redundancy between the geojson functions
-            // * add a function that rescales coordinates (based on ufelinie file) for depthmap
-            // * convert the depthmap to canvas coordinates
-
-
-            //testing if the geojson is ok
-            bad_geojson = TestGeoJSONFile(geojson_origScale);
-
-            // Rescale coordinates after loading GeoJSON
-            canvas.width = window.innerWidth * 0.66;//first reset the canvas
-            canvas.height = window.innerHeight * 0.66;
-            if (geojson.features.length > 0 && geojson.features[0].geometry.type === 'LineString') {
-                geojson.features[0].geometry.coordinates = rescaleCoordinates(geojson.features[0].geometry.coordinates);
-            }
-
-            // compute limits
-            const limits = calculateMinMax_2D_matrix(geojson.features[0].geometry.coordinates);
-            geojson_xlimits = [limits[0], limits[2]];
-            geojson_ylimits = [limits[1], limits[3]];
-           
-            //setup scale bar
-            calculateScaleBar(geojson_scalebar_length);
-
-            // depth map
-            depthMapFromShoreDistance(geojson); 
+            IntegrateGeoJSONShapeAndDepth();
 
             //reset and create new fish to keep them inside the new map
             var num = parseInt(param.numberOfFish);
             resetAndCreateFish(num, geojson);
-
-            //make new food patches
-            makeFoodPatches();
-
-            // Draw the GeoJSON
-            drawGeoJSON(geojson);
             
         } catch (error) {
             console.error("Error parsing GeoJSON:", error);
@@ -872,6 +831,47 @@ function TestGeoJSONFile(geojson_origScale) {
 }
 
 
+function IntegrateGeoJSONShapeAndDepth() {
+    // Convert geometry to LineString if it's not already
+    if (geojson.features.length > 0 && geojson.features[0].geometry.type !== 'LineString') {
+        const coordinates = geojson.features[0].geometry.coordinates[0];
+        geojson.features[0].geometry = {
+            type: 'LineString',
+            coordinates: coordinates
+        };
+    }
+
+    // Testing if the GeoJSON is valid
+    bad_geojson = TestGeoJSONFile(geojson_origScale);
+
+    // Rescale coordinates after loading GeoJSON
+    canvas.width = window.innerWidth * 0.66; // Reset canvas dimensions
+    canvas.height = window.innerHeight * 0.66;
+
+    if (geojson.features.length > 0 && geojson.features[0].geometry.type === 'LineString') {
+        geojson.features[0].geometry.coordinates = rescaleCoordinates(geojson.features[0].geometry.coordinates);
+    }
+
+    // Compute limits
+    const limits = calculateMinMax_2D_matrix(geojson.features[0].geometry.coordinates);
+    geojson_xlimits = [limits[0], limits[2]];
+    geojson_ylimits = [limits[1], limits[3]];
+    console.log(geojson_xlimits);
+
+    //setup scale bar
+    calculateScaleBar(geojson_scalebar_length);
+
+    // depth map
+    depthMapFromShoreDistance(geojson); 
+
+    //make new food patches
+    makeFoodPatches();
+
+    // Draw the GeoJSON
+    drawGeoJSON(geojson);
+}
+
+
 function InitialGeoJSONFile(filePath) {
     // Fetch the GeoJSON file from the provided filePath
     fetch(filePath)
@@ -885,45 +885,7 @@ function InitialGeoJSONFile(filePath) {
         .then(the_map => {
             geojson = the_map;
             geojson_origScale = geojson; // Deep copy the GeoJSON
-            console.log(geojson_origScale);
-
-            // Convert geometry to LineString if it's not already
-            if (geojson.features.length > 0 && geojson.features[0].geometry.type !== 'LineString') {
-                const coordinates = geojson.features[0].geometry.coordinates[0];
-                geojson.features[0].geometry = {
-                    type: 'LineString',
-                    coordinates: coordinates
-                };
-            }
-
-            // Testing if the GeoJSON is valid
-            bad_geojson = TestGeoJSONFile(geojson_origScale);
-
-            // Rescale coordinates after loading GeoJSON
-            canvas.width = window.innerWidth * 0.66; // Reset canvas dimensions
-            canvas.height = window.innerHeight * 0.66;
-
-            if (geojson.features.length > 0 && geojson.features[0].geometry.type === 'LineString') {
-                geojson.features[0].geometry.coordinates = rescaleCoordinates(geojson.features[0].geometry.coordinates);
-            }
-
-            // Compute limits
-            const limits = calculateMinMax_2D_matrix(geojson.features[0].geometry.coordinates);
-            geojson_xlimits = [limits[0], limits[2]];
-            geojson_ylimits = [limits[1], limits[3]];
-            console.log(geojson_xlimits);
-            
-            //setup scale bar
-            calculateScaleBar(geojson_scalebar_length);
-
-            // depth map
-            depthMapFromShoreDistance(geojson); 
-
-            //make new food patches
-            makeFoodPatches();
-
-            // Draw the GeoJSON
-            drawGeoJSON(geojson);
+            IntegrateGeoJSONShapeAndDepth();
         })
         .catch(error => {
             console.error("Error fetching and parsing GeoJSON:", error);
