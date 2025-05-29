@@ -235,3 +235,34 @@ for (let y = 0; y < height; y++) {
 return imgData;
 }
 
+/**
+ * Performs Delaunay triangulation on a set of 3D ground points and returns a list of triangles.
+ *
+ * @param {Array<Array<number>>} points - An array of 3D points, where each point is an array of the form [x, y, z].
+ * @returns {Array<Array<Array<number>>>} An array of triangles, each represented as an array of three [x, y, z] points.
+ *
+ * @note The input `points` array must contain at least three points, each formatted as [x, y, z].
+ */
+function triangulate_ground(points) {
+    // Extract 2D coordinates for triangulation
+    const coords2D = points.map(p => [p[0], p[1]]);
+
+    // Create the Delaunay triangulation
+    const delaunay = d3.Delaunay.from(coords2D);
+
+    // Get the triangles (indices into coords2D/points)
+    const triangles = delaunay.triangles; // flat array: [i0, i1, i2, i3, i4, i5, ...]
+    // Each consecutive triple is a triangle: [i0, i1, i2] is the first triangle, etc.
+
+    // To get the actual 3D triangles:
+    const triangleList = [];
+    for (let i = 0; i < triangles.length; i += 3) {
+        triangleList.push([
+            points[triangles[i]],
+            points[triangles[i + 1]],
+            points[triangles[i + 2]]
+        ]);
+    }
+    // triangleList is now an array of triangles, each triangle is an array of 3 [x, y, z] points
+    return triangleList;
+}

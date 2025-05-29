@@ -58,8 +58,8 @@ var geojson_scalebar_length = 200;
 var bad_geojson = false; //If true tell the user their geojson file's dimensions are too small
 var pixel_per_meter; // unit = [pixel] / [meter] : scale to fit the geojson to the canvas AND keep the aspect ratio (important for simulation and rescaling at downloading tracks)
 // would be more efficient to just save the bbox
-var bathy_map_generated;
-var bathy_map_colours;
+var depth_map;
+var depth_map_colours;
 var renderedDepth;
 
 // shared variables among all fish agents
@@ -734,7 +734,7 @@ function drawGeoJSON(geojson) {
     const features = geojson.features;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Render bathy_map_colours
+    // Render depth_map_colours
 
     ctx.putImageData(renderedDepth, 0, 0);
 
@@ -762,6 +762,28 @@ function drawLineString(coordinates) {
     ctx.stroke();
 }
 
+
+function depthMapFromShoreDistance(geojson) {
+    // depth map
+    const depthMatrix = calculateDistanceToPolygon(geojson);
+    depth_map = mapDepth(depthMatrix);
+    depth_map_colours = getDepthMapColors(depth_map);
+    renderedDepth = makeDepthMapImageData(depth_map_colours);
+}
+
+
+function resetAndCreateFish(num, geojson) {
+    if (!isNaN(num)) {
+        // Clear existing fish
+        fishes = [];
+        time_passed = 0;
+        // Create specified number of fish
+        for (var i = 0; i < num; i++) {
+            fishes.push(new Fish(i, geojson));
+        }
+    }
+}
+
 // Function to handle file selection
 
 function handleGeoJSONFile(event) {
@@ -783,27 +805,14 @@ function handleGeoJSONFile(event) {
                     coordinates: coordinates
                 };
             }
+            // TODO:
+            // * reduce redundancy between the geojson functions
+            // * add a function that rescales coordinates (based on ufelinie file) for depthmap
+            // * convert the depthmap to canvas coordinates
+
 
             //testing if the geojson is ok
-           // Extracting the list of coordinates
-           bad_geojson = false; //reset to false
-
-            let coordinates = geojson_origScale.features[0].geometry.coordinates;
-
-            // Extracting the X and Y values from the coordinates
-            let xCoordinates = coordinates.map(coord => coord[0]);
-            let yCoordinates = coordinates.map(coord => coord[1]);
-
-            const minX = Math.min(...xCoordinates);
-            const maxX = Math.max(...xCoordinates);
-            const minY = Math.min(...yCoordinates);
-            const maxY = Math.max(...yCoordinates);
-            console.log(minX);
-            console.log("the x dim is", (maxX-minX))
-            if((maxX - minX) < 5 ||(maxY-minY) < 5) {
-                bad_geojson = true;
-                console.log("bad geojson");
-            }
+            bad_geojson = TestGeoJSONFile(geojson_origScale);
 
             // Rescale coordinates after loading GeoJSON
             canvas.width = window.innerWidth * 0.66;//first reset the canvas
@@ -820,24 +829,12 @@ function handleGeoJSONFile(event) {
             //setup scale bar
             calculateScaleBar(geojson_scalebar_length);
 
-            // dept map
-            const depthMatrix = calculateDistanceToPolygon(geojson);
-            bathy_map_generated = mapDepth(depthMatrix);
-            console.log(bathy_map_generated);
-            bathy_map_colours = getDepthMapColors(bathy_map_generated);
-            renderedDepth = makeDepthMapImageData(bathy_map_colours);
+            // depth map
+            depthMapFromShoreDistance(geojson); 
 
             //reset and create new fish to keep them inside the new map
             var num = parseInt(param.numberOfFish);
-            if (!isNaN(num)) {
-                    // Clear existing fish
-                    fishes = [];
-                    time_passed = 0;
-                    // Create specified number of fish
-                    for (var i = 0; i < num; i++) {
-                        fishes.push(new Fish(i, geojson));
-                    }
-            }
+            resetAndCreateFish(num, geojson);
 
             //make new food patches
             makeFoodPatches();
@@ -852,6 +849,28 @@ function handleGeoJSONFile(event) {
 
     reader.readAsText(file);
 }
+
+
+function TestGeoJSONFile(geojson_origScale) {
+    bad_geojson = false; // Reset to false
+    let coordinates = geojson_origScale.features[0].geometry.coordinates;
+    let xCoordinates = coordinates.map(coord => coord[0]);
+    let yCoordinates = coordinates.map(coord => coord[1]);
+
+    const minX = Math.min(...xCoordinates);
+    const maxX = Math.max(...xCoordinates);
+    const minY = Math.min(...yCoordinates);
+    const maxY = Math.max(...yCoordinates);
+
+    console.log(minX);
+    console.log("The x dimension is", (maxX - minX));
+    if ((maxX - minX) < 5 || (maxY - minY) < 5) {
+        bad_geojson = true;
+        console.log("Bad GeoJSON");
+    }
+    return bad_geojson;
+}
+
 
 function InitialGeoJSONFile(filePath) {
     // Fetch the GeoJSON file from the provided filePath
@@ -878,22 +897,7 @@ function InitialGeoJSONFile(filePath) {
             }
 
             // Testing if the GeoJSON is valid
-            let bad_geojson = false; // Reset to false
-            let coordinates = geojson_origScale.features[0].geometry.coordinates;
-            let xCoordinates = coordinates.map(coord => coord[0]);
-            let yCoordinates = coordinates.map(coord => coord[1]);
-
-            const minX = Math.min(...xCoordinates);
-            const maxX = Math.max(...xCoordinates);
-            const minY = Math.min(...yCoordinates);
-            const maxY = Math.max(...yCoordinates);
-
-            console.log(minX);
-            console.log("The x dimension is", (maxX - minX));
-            if ((maxX - minX) < 5 || (maxY - minY) < 5) {
-                bad_geojson = true;
-                console.log("Bad GeoJSON");
-            }
+            bad_geojson = TestGeoJSONFile(geojson_origScale);
 
             // Rescale coordinates after loading GeoJSON
             canvas.width = window.innerWidth * 0.66; // Reset canvas dimensions
@@ -912,13 +916,8 @@ function InitialGeoJSONFile(filePath) {
             //setup scale bar
             calculateScaleBar(geojson_scalebar_length);
 
-            // Depth map generation
-            const depthMatrix = calculateDistanceToPolygon(geojson);
-            const bathy_map_generated = mapDepth(depthMatrix);
-            console.log(bathy_map_generated);
-
-            bathy_map_colours = getDepthMapColors(bathy_map_generated);
-            renderedDepth = makeDepthMapImageData(bathy_map_colours);
+            // depth map
+            depthMapFromShoreDistance(geojson); 
 
             //make new food patches
             makeFoodPatches();
@@ -1407,19 +1406,10 @@ gui.add(param, 'geojsonFile').name('Select GeoJSON file');
 gui.add(param, 'numberOfFish').name('Number of fish').onChange(value => {
     // Handle change
     var num = parseInt(value);
-
-    if (!isNaN(num)) {
-        if (geojson) {
-            // Clear existing fish
-            fishes = [];
-            // Create specified number of fish
-            for (var i = 0; i < num; i++) {
-                fishes.push(new Fish(i, geojson));
-            }
-        } else {
-            console.log("no geojson file");
-        }
-
+    if (geojson) {
+        resetAndCreateFish(num, geojson);
+    } else {
+        console.log("no geojson file");
     }
 });
 
