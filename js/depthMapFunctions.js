@@ -3,34 +3,77 @@ function calculateDistanceToPolygon(geojson) {
     // Extract coordinates of the polygon boundary
     const polygonCoordinates = geojson.features[0].geometry.coordinates; // Assuming it's the first feature and a Polygon
     
-    // Calculate bounding box
-    const bbox = calculateBbox(geojson);
-    
     // Create an empty matrix to store distances
     const matrix = [];
-    
-    // Explode polygon vertices
-    const vertices = turf.explode(geojson);
     
     // Loop through each point inside the bounding box of the polygon
     for (let y = 0; y <= canvas.height; y+=depthResolution) {
         const row = [];
         for (let x = 0; x <= canvas.width; x+=depthResolution) {
-            // Convert pixel coordinates to coordinates in the map's CRS
-            const lng = x;
-            const lat = y;
-
-            if(pointInsidePolygon([lng, lat], polygonCoordinates)){
+            if(pointInsidePolygon([x, y], polygonCoordinates)){
                 //polygonCoordinates must be flattened for the pointToPolygonDistance function **note!
-                const distance = pointToPolygonDistance([lng, lat], polygonCoordinates.flat());
+                const distance = pointToPolygonDistance([x, y], polygonCoordinates.flat());
                 row.push(distance);
-            }else{
+            } else {
                 row.push(NaN);   
             }
         }
         matrix.push(row);
     }
     return matrix;
+}
+
+/**
+* this function samples the depth for a grid with resolution depthResolution from the 
+* second feature, which is of type == MultiPoint Z
+* for each grid point it takes the closest point from the depth feature a depth
+*/
+function sample_depth_map(geojson) {
+    // Extract coordinates of the polygon boundary
+    const polygonCoordinates = geojson.features[0].geometry.coordinates; // Assuming it's the first feature and a Polygon
+    // Extract depth coordinates
+    const depthCoordinates = geojson.features[1].geometry.coordinates; // Assuming it's the second feature and a MultiPopint Z 
+    // ensure the depth is negative
+    const min_depth = Math.min(...depthCoordinates.map(coord => coord[2])); // Get the minimum depth from the polygon coordinates
+    var sign_factor = 1;
+    if (min_depth > 0) {
+        sign_factor = -1; // If the minimum depth is positive, we assume the depth values are negative
+    }
+    
+    // Create an empty matrix to store distances
+    const matrix = [];
+    
+    // Loop through each point inside the bounding box of the polygon
+    for (let y = 0; y <= canvas.height; y+=depthResolution) {
+        const row = [];
+        for (let x = 0; x <= canvas.width; x+=depthResolution) {
+            if(pointInsidePolygon([x, y], polygonCoordinates)){
+                //polygonCoordinates must be flattened for the pointToPolygonDistance function **note!
+                const depth = getDepthOfClosestMultipoint([x, y], depthCoordinates);
+                row.push(sign_factor * depth);
+            } else {
+                row.push(NaN);   
+            }
+        }
+        matrix.push(row);
+    }
+    return matrix;
+}
+
+function getDepthOfClosestMultipoint(point, multiPoint) {
+    let minDistanceXY = Infinity;
+    let depth = 0; // Initialize depth to 0, will be updated if a point is found
+    multiPoint.forEach(mp => {
+        const distance = Math.sqrt(
+            Math.pow(point[0] - mp[0], 2) + Math.pow(point[1] - mp[1], 2)
+        );
+        if (distance < minDistanceXY) {
+            minDistanceXY = distance;
+            depth = mp[2]; // Update depth with the z-coordinate of the closest point
+        }
+        minDistanceXY = Math.min(minDistanceXY, distance);
+    });
+    return depth;
 }
 
 function pointToPolygonDistance(point, polygon) {

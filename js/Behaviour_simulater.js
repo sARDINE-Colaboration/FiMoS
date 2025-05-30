@@ -42,7 +42,8 @@ const sim_steps = Math.floor(dt_output / dt);
 var time_passed = 0;
 
 // temporary depth data (TODO: load maxDepth from data)
-const maxDepth = -8;
+const maxDepth_ori = -8; // if no DepthMap is loaded, use this value
+var maxDepth = -8;
 
 //maximum trajectory length
 //var max_iter = 10000;
@@ -698,10 +699,10 @@ function rescaleToGeoJSON(x, y) {
 
 // Function to rescale coordinates
 function rescaleCoordinates(coordinates) {
-    const minX = Math.min(...coordinates.map(coord => coord[0]));
-    const maxX = Math.max(...coordinates.map(coord => coord[0]));
-    const minY = Math.min(...coordinates.map(coord => coord[1]));
-    const maxY = Math.max(...coordinates.map(coord => coord[1]));
+    const minX = geojson_xlimits_ori[0];
+    const maxX = geojson_xlimits_ori[1];
+    const minY = geojson_ylimits_ori[0];
+    const maxY = geojson_ylimits_ori[1];
     
     // first adjust the width such that it fits to the canvas
     pixel_per_meter = canvas.width / (maxX - minX);
@@ -736,6 +737,33 @@ function rescaleCoordinates(coordinates) {
     return rescaled_coords;
 }
 
+// Function to rescale x,y coordinates but keep z untouched
+function rescaleCoordinatesXYnotZ(coordinates) {
+    const minX = geojson_xlimits_ori[0];
+    const maxX = geojson_xlimits_ori[1];
+    const minY = geojson_ylimits_ori[0];
+    const maxY = geojson_ylimits_ori[1];
+    
+    // ATTENTION: this function assumes that rescaleCoordinates was called before
+    // --> pixel_per_meter, x_as_max_extent, rescale_offset are already defined
+
+    if (x_as_max_extent) {
+        //shift y positions to centre
+        var rescaled_coords = coordinates.map(coord => [
+            (coord[0] - minX) * pixel_per_meter,
+            canvas.height - ( (coord[1] - minY) * pixel_per_meter + rescale_offset ),
+            coord[2] ] );
+    } else {
+        //shift x positions to centre
+        var rescaled_coords = coordinates.map(coord => [
+            (coord[0] - minX) * pixel_per_meter + rescale_offset,
+            canvas.height - (coord[1] - minY) * pixel_per_meter,
+            coord[2] ] );
+    }
+
+    return rescaled_coords;
+}
+
 function drawGeoJSON(geojson) {
     const features = geojson.features;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -767,9 +795,17 @@ function drawLineString(coordinates) {
     }
     ctx.stroke();
 }
-
+function depthMapFromData(geojson) {
+    // depth map
+    depth_map = sample_depth_map(geojson)
+    const flatDepths = depth_map.flat().filter(d => !isNaN(d));
+    maxDepth = Math.min(...flatDepths);
+    depth_map_colours = getDepthMapColors(depth_map);
+    renderedDepth = makeDepthMapImageData(depth_map_colours);
+}
 
 function depthMapFromShoreDistance(geojson) {
+    maxDepth = 1 * maxDepth_ori; // reset the maxDepth to the original value
     // depth map
     const depthMatrix = calculateDistanceToPolygon(geojson);
     depth_map = mapDepth(depthMatrix);
@@ -870,16 +906,20 @@ function IntegrateGeoJSONShapeAndDepth() {
     //setup scale bar
     calculateScaleBar(geojson_scalebar_length);
 
-    // // depth map (if available use it, otherwise compute from shore distance)
-    // if (geojson.features.length > 1 &&
-    //     geojson.features[1].geometry.type === 'MultiPoint') {
-    //     // depth map from MultiPoint geometry
-    //     const depthPoints = geojson.features[1].geometry.coordinates;
-    //         // && geojson.features[1].geometry.type === 'LineString') {
-    // } else {
-    //     depthMapFromShoreDistance(geojson); 
-    // }
-    depthMapFromShoreDistance(geojson); 
+    // depth map (if available use it, otherwise compute from shore distance)
+    if (geojson.features.length > 1) {
+        const feature1 = geojson.features[1];
+        if (feature1.geometry.type === 'MultiPoint') {
+            // depth map from MultiPoint geometry
+            feature1.geometry.coordinates = rescaleCoordinatesXYnotZ(feature1.geometry.coordinates);
+            depthMapFromData(geojson);
+            // const depthPoints = feature1.geometry.coordinates;
+        } else {
+            console.warn("Expected MultiPoint geometry for depth map, but found:", feature1.geometry.type);
+        }
+    } else {
+        depthMapFromShoreDistance(geojson); 
+    }
 
     //make new food patches
     makeFoodPatches();
