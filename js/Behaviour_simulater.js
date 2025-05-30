@@ -46,17 +46,20 @@ const maxDepth = -8;
 
 //maximum trajectory length
 //var max_iter = 10000;
-var depthResolution = 4;
+var depthResolution = 4; // used in depthMapFunctions.js
 
 // Variable to store loaded shape data
 var geojson; // Declare the variable here
-var geojson_origScale; //declare a copy of geojson to keep the original scaling information
+var geojson_xlimits_ori;
+var geojson_ylimits_ori;
 var geojson_xlimits;
 var geojson_ylimits;
 var geojson_scalebar = [];
 var geojson_scalebar_length = 200;
 var bad_geojson = false; //If true tell the user their geojson file's dimensions are too small
 var pixel_per_meter; // unit = [pixel] / [meter] : scale to fit the geojson to the canvas AND keep the aspect ratio (important for simulation and rescaling at downloading tracks)
+var x_as_max_extent = true; // if true, rescale x coordinates to fit the canvas width --> Y has offset to be in middle
+var rescale_offset = 0; // offset to rescale the coordinates to fit the canvas
 // would be more efficient to just save the bbox
 var depth_map;
 var depth_map_colours;
@@ -680,13 +683,14 @@ function time_passed_stamp(){
 
 
 function rescaleToGeoJSON(x, y) {
-    // Get the bounding box of the GeoJSON object
-    const bbox = calculateBbox(geojson_origScale);
-
     // Scale the coordinates
-    const scaledX = (x) / pixel_per_meter + bbox[0];
-    const scaledY = (y) / pixel_per_meter + bbox[1];
-
+    if (x_as_max_extent) {
+        const scaledX = (x)                  / pixel_per_meter + geojson_xlimits_ori[0];
+        const scaledY = (y - rescale_offset) / pixel_per_meter + geojson_ylimits_ori[0];
+    } else {
+        const scaledX = (x - rescale_offset) / pixel_per_meter + geojson_xlimits_ori[0];
+        const scaledY = (y)                  / pixel_per_meter + geojson_ylimits_ori[0];
+    }
     return [scaledX, scaledY];
 
 }
@@ -699,34 +703,36 @@ function rescaleCoordinates(coordinates) {
     const minY = Math.min(...coordinates.map(coord => coord[1]));
     const maxY = Math.max(...coordinates.map(coord => coord[1]));
     
-
     // first adjust the width such that it fits to the canvas
     pixel_per_meter = canvas.width / (maxX - minX);
-    const offsetY = ( canvas.height - (maxY-minY)*pixel_per_meter) / 2;
+    x_as_max_extent = true;
+    rescale_offset = ( canvas.height - (maxY-minY)*pixel_per_meter) / 2;
 
     // now check if the rescaled coordinates fit the height
     // if True: keep the scale
     // if False: recompute the scale using height
     if ((maxY - minY) * pixel_per_meter > canvas.height) {
+        x_as_max_extent = false; // rescale y coordinates to fit the canvas height
         pixel_per_meter = canvas.height / (maxY - minY);
-        const offsetX = ( canvas.width - (maxX-minX)*pixel_per_meter ) /2;
+        rescale_offset = ( canvas.width - (maxX-minX)*pixel_per_meter ) /2;
         
         //shift x positions to centre
         var rescaled_coords = coordinates.map(coord => [
-            (coord[0] - minX) * pixel_per_meter + offsetX,
+            (coord[0] - minX) * pixel_per_meter + rescale_offset,
             canvas.height - (coord[1] - minY) * pixel_per_meter]);
         
     }else{
         //otherwise shift Y positions to centre
         var rescaled_coords = coordinates.map(coord => [
             (coord[0] - minX) * pixel_per_meter,
-            canvas.height - ( (coord[1] - minY) * pixel_per_meter + offsetY ) ] );
+            canvas.height - ( (coord[1] - minY) * pixel_per_meter + rescale_offset ) ] );
     }
 
     geojson_scalebar_length = Math.round(((maxX-minX)*0.15)/10)*10;
 
     
-    console.log("the canvas scale is", pixel_per_meter, (maxX-minX), (maxY-minY));
+    console.log("the canvas scale is (pixel_per_meter, xlen, ylen)",
+        pixel_per_meter, (maxX-minX), (maxY-minY));
     return rescaled_coords;
 }
 
@@ -794,7 +800,6 @@ function handleGeoJSONFile(event) {
         const result = e.target.result;
         try {
             geojson = JSON.parse(result);
-            geojson_origScale = JSON.parse(result);
             IntegrateGeoJSONShapeAndDepth();
 
             //reset and create new fish to keep them inside the new map
@@ -810,16 +815,13 @@ function handleGeoJSONFile(event) {
 }
 
 
-function TestGeoJSONFile(geojson_origScale) {
+function TestGeoJSONFile() {
+    // the former version of this function only checked the limits of the first feature
     bad_geojson = false; // Reset to false
-    let coordinates = geojson_origScale.features[0].geometry.coordinates;
-    let xCoordinates = coordinates.map(coord => coord[0]);
-    let yCoordinates = coordinates.map(coord => coord[1]);
-
-    const minX = Math.min(...xCoordinates);
-    const maxX = Math.max(...xCoordinates);
-    const minY = Math.min(...yCoordinates);
-    const maxY = Math.max(...yCoordinates);
+    const minX = geojson_xlimits_ori[0];
+    const maxX = geojson_xlimits_ori[1];
+    const minY = geojson_ylimits_ori[0];
+    const maxY = geojson_ylimits_ori[1];
 
     console.log(minX);
     console.log("The x dimension is", (maxX - minX));
@@ -832,6 +834,14 @@ function TestGeoJSONFile(geojson_origScale) {
 
 
 function IntegrateGeoJSONShapeAndDepth() {
+    // get limits of the original GeoJSON
+    const bbox = calculateBbox(geojson)
+    geojson_xlimits_ori = [bbox[0], bbox[2]];
+    geojson_ylimits_ori = [bbox[1], bbox[3]];
+
+    // Testing if the GeoJSON is valid
+    bad_geojson = TestGeoJSONFile();
+
     // Convert geometry to LineString if it's not already
     if (geojson.features.length > 0 && geojson.features[0].geometry.type !== 'LineString') {
         const coordinates = geojson.features[0].geometry.coordinates[0];
@@ -841,19 +851,18 @@ function IntegrateGeoJSONShapeAndDepth() {
         };
     }
 
-    // Testing if the GeoJSON is valid
-    bad_geojson = TestGeoJSONFile(geojson_origScale);
-
     // Rescale coordinates after loading GeoJSON
     canvas.width = window.innerWidth * 0.66; // Reset canvas dimensions
     canvas.height = window.innerHeight * 0.66;
 
-    if (geojson.features.length > 0 && geojson.features[0].geometry.type === 'LineString') {
-        geojson.features[0].geometry.coordinates = rescaleCoordinates(geojson.features[0].geometry.coordinates);
+    // Rescale coordinates if geometry is LineString
+    const feature0 = geojson.features[0];
+    if (feature0.geometry.type === 'LineString') {
+        feature0.geometry.coordinates = rescaleCoordinates(feature0.geometry.coordinates);
     }
 
     // Compute limits
-    const limits = calculateMinMax_2D_matrix(geojson.features[0].geometry.coordinates);
+    const limits = calculateMinMax_2D_matrix(feature0.geometry.coordinates);
     geojson_xlimits = [limits[0], limits[2]];
     geojson_ylimits = [limits[1], limits[3]];
     console.log(geojson_xlimits);
@@ -861,7 +870,15 @@ function IntegrateGeoJSONShapeAndDepth() {
     //setup scale bar
     calculateScaleBar(geojson_scalebar_length);
 
-    // depth map
+    // // depth map (if available use it, otherwise compute from shore distance)
+    // if (geojson.features.length > 1 &&
+    //     geojson.features[1].geometry.type === 'MultiPoint') {
+    //     // depth map from MultiPoint geometry
+    //     const depthPoints = geojson.features[1].geometry.coordinates;
+    //         // && geojson.features[1].geometry.type === 'LineString') {
+    // } else {
+    //     depthMapFromShoreDistance(geojson); 
+    // }
     depthMapFromShoreDistance(geojson); 
 
     //make new food patches
@@ -884,7 +901,6 @@ function InitialGeoJSONFile(filePath) {
     })
         .then(the_map => {
             geojson = the_map;
-            geojson_origScale = geojson; // Deep copy the GeoJSON
             IntegrateGeoJSONShapeAndDepth();
         })
         .catch(error => {
@@ -949,7 +965,10 @@ function calculateBbox(thegeojson) {
                 bbox[1] = Math.min(bbox[1], coords[1]);
                 bbox[2] = Math.max(bbox[2], coords[0]);
                 bbox[3] = Math.max(bbox[3], coords[1]);
-            } else if (feature.geometry.type === "LineString" || feature.geometry.type === "Polygon") {
+            } else if (feature.geometry.type === "LineString" ||
+                       feature.geometry.type === "Polygon" ||
+                       feature.geometry.type === "MultiPoint") {
+                console.log("calculating bbox for", feature.geometry.type);
                 coords.forEach(coord => {
                     bbox[0] = Math.min(bbox[0], coord[0]);
                     bbox[1] = Math.min(bbox[1], coord[1]);
