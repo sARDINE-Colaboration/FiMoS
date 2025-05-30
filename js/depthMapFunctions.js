@@ -20,19 +20,17 @@ function calculateDistanceToPolygon(geojson) {
             const lng = x;
             const lat = y;
 
-        if(pointInsidePolygon([lng, lat], polygonCoordinates)){
-            //polygonCoordinates must be flattened for the pointToPolygonDistance function **note!
-            const distance = pointToPolygonDistance([lng, lat], polygonCoordinates.flat());
-            row.push(distance);
-        }else{
-            row.push(NaN);   
+            if(pointInsidePolygon([lng, lat], polygonCoordinates)){
+                //polygonCoordinates must be flattened for the pointToPolygonDistance function **note!
+                const distance = pointToPolygonDistance([lng, lat], polygonCoordinates.flat());
+                row.push(distance);
+            }else{
+                row.push(NaN);   
+            }
         }
+        matrix.push(row);
     }
-    
-    matrix.push(row);
-}
-
-return matrix;
+    return matrix;
 }
 
 function pointToPolygonDistance(point, polygon) {
