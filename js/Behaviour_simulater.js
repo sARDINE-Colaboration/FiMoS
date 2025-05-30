@@ -870,14 +870,6 @@ function TestGeoJSONFile() {
 
 
 function IntegrateGeoJSONShapeAndDepth() {
-    // get limits of the original GeoJSON
-    const bbox = calculateBbox(geojson)
-    geojson_xlimits_ori = [bbox[0], bbox[2]];
-    geojson_ylimits_ori = [bbox[1], bbox[3]];
-
-    // Testing if the GeoJSON is valid
-    bad_geojson = TestGeoJSONFile();
-
     // Convert geometry to LineString if it's not already
     if (geojson.features.length > 0 && geojson.features[0].geometry.type !== 'LineString') {
         const coordinates = geojson.features[0].geometry.coordinates[0];
@@ -886,6 +878,14 @@ function IntegrateGeoJSONShapeAndDepth() {
             coordinates: coordinates
         };
     }
+
+    // get limits of the original GeoJSON
+    const bbox = calculateBbox(geojson)
+    geojson_xlimits_ori = [bbox[0], bbox[2]];
+    geojson_ylimits_ori = [bbox[1], bbox[3]];
+
+    // Testing if the GeoJSON is valid
+    bad_geojson = TestGeoJSONFile();
 
     // Rescale coordinates after loading GeoJSON
     canvas.width = window.innerWidth * 0.66; // Reset canvas dimensions
