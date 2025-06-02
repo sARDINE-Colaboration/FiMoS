@@ -9,6 +9,7 @@ function calculateDistanceToPolygon(geojson) {
     // Loop through each point inside the bounding box of the polygon
     for (let y = 0; y <= canvas.height; y+=depthResolution) {
         const row = [];
+        const row_indices = [];
         for (let x = 0; x <= canvas.width; x+=depthResolution) {
             if(pointInsidePolygon([x, y], polygonCoordinates)){
                 //polygonCoordinates must be flattened for the pointToPolygonDistance function **note!
@@ -21,6 +22,71 @@ function calculateDistanceToPolygon(geojson) {
         matrix.push(row);
     }
     return matrix;
+}
+
+function getMatrixIndicesAndPoints(matrix) {
+    // Create an empty matrix to store distances
+    const matrix_indices = [];  
+    const depth_points = [];
+    var valid_value_counter = 0;
+    
+    // Loop through the whole matrix
+    for (let y = 0; y < matrix.length; y++) {
+        const row_indices = [];
+        for (let x = 0; x < matrix[y].length; x++) {
+            const depth = matrix[y][x];
+            if(!isNaN(depth)){
+                row_indices.push(valid_value_counter);
+                valid_value_counter++;
+                const point = [x * depthResolution, y * depthResolution, depth];
+                depth_points.push(point);
+            } else {
+                row_indices.push(NaN);
+            }
+        }
+        matrix_indices.push(row_indices);
+    }
+    return [matrix_indices, depth_points];
+}
+
+function depthIndicesWithConflicts(xyz, xyz_next, depth_map){
+    // get the indices of the points in the depth map with resolution depthResolution
+    let xIndex = Math.round(xyz[0] / depthResolution);
+    let yIndex = Math.round(xyz[1] / depthResolution);
+
+    // the the indices of the next point + 1 (triangle edge) and subtract 1 from the current point
+    // PPK-note: could be problematic because the additional 1 might go out of canvas bounds
+    //           -solution: xStart = Math.max(0, xStart), ...;
+    const dx = xyz_next[0] - xyz[0];
+    const dy = xyz_next[1] - xyz[1];
+    const xIndex_next = Math.round(xyz_next[0] / depthResolution) + 1 * Math.sign(dx);
+    const yIndex_next = Math.round(xyz_next[1] / depthResolution) + 1 * Math.sign(dy);
+    xIndex -= Math.sign(dx);
+    yIndex -= Math.sign(dy); 
+    // now take the min and max of the indices to get the submatrix
+    const xStart = Math.min(xIndex, xIndex_next);
+    const xEnd = Math.max(xIndex, xIndex_next);
+    const yStart = Math.min(yIndex, yIndex_next);
+    const yEnd = Math.max(yIndex, yIndex_next);
+    // Extract the submatrix using slice (like numpy's depth_map[yStart:yEnd+1, xStart:xEnd+1])
+    const subMatrix = depth_map.slice(yStart, yEnd + 1).map(row => row.slice(xStart, xEnd + 1));
+
+    // now check if the current and next depth are 
+    const depth_reference = Math.min(xyz[2], xyz_next[2]);
+    const min_depth_submatrix = Math.min(...subMatrix.flat().filter(value => !isNaN(value)));
+    const conflictIndices = [];
+    // if the min depth in the submatrix is greater than the depth reference, there is a conflict
+    if (min_depth_submatrix > depth_reference) {
+        // return the indices of the submatrix whose depths are larger than the depth reference
+        for (let i = 0; i < subMatrix.length; i++) {
+            for (let j = 0; j < subMatrix[i].length; j++) {
+                if (subMatrix[i][j] > depth_reference) {
+                    conflictIndices.push([yStart + i, xStart + j]);
+                }
+            }
+        }
+    }
+    return conflictIndices;
 }
 
 /**
@@ -43,22 +109,32 @@ function sample_depth_map(geojson) {
     
     // Create an empty matrix to store distances
     const matrix = [];
+    const matrix_indices = [];
+    const depth_points = [];
+    var valid_value_counter = 0;
     
     // Loop through each point inside the bounding box of the polygon
     for (let y = 0; y <= canvas.height; y+=depthResolution) {
         const row = [];
+        const row_indices = [];
         for (let x = 0; x <= canvas.width; x+=depthResolution) {
             if(pointInsidePolygon([x, y], polygonCoordinates)){
                 //polygonCoordinates must be flattened for the pointToPolygonDistance function **note!
                 const depth = getDepthOfClosestMultipoint([x, y], depthCoordinates);
                 row.push(sign_factor * depth);
+                row_indices.push(valid_value_counter);
+                valid_value_counter++;
+                const point = [x * depthResolution, y * depthResolution, depth];
+                depth_points.push(point);
             } else {
                 row.push(NaN);   
+                row_indices.push(NaN);
             }
         }
         matrix.push(row);
+        matrix_indices.push(row_indices);
     }
-    return matrix;
+    return [matrix, matrix_indices, depth_points];
 }
 
 function getDepthOfClosestMultipoint(point, multiPoint) {

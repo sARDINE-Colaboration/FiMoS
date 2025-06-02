@@ -63,6 +63,8 @@ var x_as_max_extent = true; // if true, rescale x coordinates to fit the canvas 
 var rescale_offset = 0; // offset to rescale the coordinates to fit the canvas
 // would be more efficient to just save the bbox
 var depth_map;
+var depth_map_points_idxs; // same dimensions as depth_map, connects the depth_map to depth_points
+var depth_points; // are all non-NaN 3D points in depth_map
 var depth_map_colours;
 var renderedDepth;
 
@@ -795,7 +797,7 @@ function drawLineString(coordinates) {
 }
 function depthMapFromData(geojson) {
     // get a grid detailed depth map with depthResolution as grid-distance
-    depth_map = sample_depth_map(geojson)
+    [depth_map, depth_map_points_idxs, depth_points] = sample_depth_map(geojson)
     const flatDepths = depth_map.flat().filter(d => !isNaN(d));
     maxDepth = Math.min(...flatDepths);
     depth_map_colours = getDepthMapColors(depth_map);
@@ -803,10 +805,11 @@ function depthMapFromData(geojson) {
 }
 
 function depthMapFromShoreDistance(geojson) {
-    maxDepth = 1 * maxDepth_ori; // reset the maxDepth to the original value
+    maxDepth = maxDepth_ori * pixel_per_meter; // reset the maxDepth to the original value
     // depth map
     const depthMatrix = calculateDistanceToPolygon(geojson);
     depth_map = mapDepth(depthMatrix);
+    [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map)
     depth_map_colours = getDepthMapColors(depth_map);
     renderedDepth = makeDepthMapImageData(depth_map_colours);
 }
@@ -844,7 +847,6 @@ function handleGeoJSONFile(event) {
             console.error("Error parsing GeoJSON:", error);
         }
     };
-
     reader.readAsText(file);
 }
 
