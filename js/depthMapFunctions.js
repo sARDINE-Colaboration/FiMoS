@@ -26,7 +26,7 @@ function calculateDistanceToPolygon(geojson) {
 /**
 * this function samples the depth for a grid with resolution depthResolution from the 
 * second feature, which is of type == MultiPoint Z
-* for each grid point it takes the closest point from the depth feature a depth
+* for each grid point it takes the depth from the closest point from the depth feature
 */
 function sample_depth_map(geojson) {
     // Extract coordinates of the polygon boundary
@@ -34,7 +34,8 @@ function sample_depth_map(geojson) {
     // Extract depth coordinates
     const depthCoordinates = geojson.features[1].geometry.coordinates; // Assuming it's the second feature and a MultiPopint Z 
     // ensure the depth is negative
-    const min_depth = Math.min(...depthCoordinates.map(coord => coord[2])); // Get the minimum depth from the polygon coordinates
+    const limitedDepthCoordinates = depthCoordinates.slice(0, 1000); // Use only the first 1000 entries
+    const min_depth = Math.min(...limitedDepthCoordinates.map(coord => coord[2])); // Get the minimum depth from the limited coordinates
     var sign_factor = 1;
     if (min_depth > 0) {
         sign_factor = -1; // If the minimum depth is positive, we assume the depth values are negative

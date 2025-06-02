@@ -484,9 +484,9 @@ class Fish {
         // Ensure hue stays within the range [0, 360]
         hue = hue % 360;
 
-        // Set color based on fish speed
+        // Set color based on fish state 
         ctx.fillStyle = "hsl(" + hue + ", 100%, 50%)";
-        //ctx.fillStyle = "white";
+        // ctx.fillStyle = "white";
 
         // Calculate the depth ratio
         const depthRatio = Math.abs(this.position[2] / maxDepth); // Adjust maxDepth according to your global variable
@@ -682,8 +682,7 @@ function time_passed_stamp(){
     HUDctx.fillText(timerText, HUDcanvas.width * 0.15 / 5, HUDcanvas.height*0.5);
 } 
 
-
-function rescaleToGeoJSON(x, y) {
+function rescaleToGeoJSON(x, y, z) {
     // Scale the coordinates
     if (x_as_max_extent) {
         const scaledX = (x)                  / pixel_per_meter + geojson_xlimits_ori[0];
@@ -692,13 +691,13 @@ function rescaleToGeoJSON(x, y) {
         const scaledX = (x - rescale_offset) / pixel_per_meter + geojson_xlimits_ori[0];
         const scaledY = (y)                  / pixel_per_meter + geojson_ylimits_ori[0];
     }
+    const scaledZ = z / pixel_per_meter;
     return [scaledX, scaledY];
 
 }
 
-
 // Function to rescale coordinates
-function rescaleCoordinates(coordinates) {
+function rescaleCoordinates2D(coordinates) {
     const minX = geojson_xlimits_ori[0];
     const maxX = geojson_xlimits_ori[1];
     const minY = geojson_ylimits_ori[0];
@@ -738,13 +737,13 @@ function rescaleCoordinates(coordinates) {
 }
 
 // Function to rescale x,y coordinates but keep z untouched
-function rescaleCoordinatesXYnotZ(coordinates) {
+function rescaleCoordinates3D(coordinates) {
     const minX = geojson_xlimits_ori[0];
     const maxX = geojson_xlimits_ori[1];
     const minY = geojson_ylimits_ori[0];
     const maxY = geojson_ylimits_ori[1];
     
-    // ATTENTION: this function assumes that rescaleCoordinates was called before
+    // ATTENTION: this function assumes that rescaleCoordinates2D was called before
     // --> pixel_per_meter, x_as_max_extent, rescale_offset are already defined
 
     if (x_as_max_extent) {
@@ -752,13 +751,13 @@ function rescaleCoordinatesXYnotZ(coordinates) {
         var rescaled_coords = coordinates.map(coord => [
             (coord[0] - minX) * pixel_per_meter,
             canvas.height - ( (coord[1] - minY) * pixel_per_meter + rescale_offset ),
-            coord[2] ] );
+            coord[2] * pixel_per_meter ] );
     } else {
         //shift x positions to centre
         var rescaled_coords = coordinates.map(coord => [
             (coord[0] - minX) * pixel_per_meter + rescale_offset,
             canvas.height - (coord[1] - minY) * pixel_per_meter,
-            coord[2] ] );
+            coord[2] * pixel_per_meter ] );
     }
 
     return rescaled_coords;
@@ -796,7 +795,7 @@ function drawLineString(coordinates) {
     ctx.stroke();
 }
 function depthMapFromData(geojson) {
-    // depth map
+    // get a grid detailed depth map with depthResolution as grid-distance
     depth_map = sample_depth_map(geojson)
     const flatDepths = depth_map.flat().filter(d => !isNaN(d));
     maxDepth = Math.min(...flatDepths);
@@ -894,7 +893,7 @@ function IntegrateGeoJSONShapeAndDepth() {
     // Rescale coordinates if geometry is LineString
     const feature0 = geojson.features[0];
     if (feature0.geometry.type === 'LineString') {
-        feature0.geometry.coordinates = rescaleCoordinates(feature0.geometry.coordinates);
+        feature0.geometry.coordinates = rescaleCoordinates2D(feature0.geometry.coordinates);
     }
 
     // Compute limits
@@ -911,7 +910,7 @@ function IntegrateGeoJSONShapeAndDepth() {
         const feature1 = geojson.features[1];
         if (feature1.geometry.type === 'MultiPoint') {
             // depth map from MultiPoint geometry
-            feature1.geometry.coordinates = rescaleCoordinatesXYnotZ(feature1.geometry.coordinates);
+            feature1.geometry.coordinates = rescaleCoordinates3D(feature1.geometry.coordinates);
             depthMapFromData(geojson);
             // const depthPoints = feature1.geometry.coordinates;
         } else {
@@ -1334,8 +1333,8 @@ function downloadTracks() {
 
     const rescaledTracks = fishes.map(fish => {
         return fish.positions.map((position, index) => {
-            const originalCoord = rescaleToGeoJSON(position[0], position[1]);
-            return [originalCoord[0], originalCoord[1], position[2], fish.timestamp[index]];
+            const originalCoord = rescaleToGeoJSON(position[0], position[1], position[2]);
+            return [originalCoord[0], originalCoord[1], originalCoord[2], fish.timestamp[index]];
         });
     });
 
