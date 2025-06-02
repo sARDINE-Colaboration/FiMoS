@@ -692,8 +692,7 @@ function rescaleToGeoJSON(x, y, z) {
         const scaledY = (y)                  / pixel_per_meter + geojson_ylimits_ori[0];
     }
     const scaledZ = z / pixel_per_meter;
-    return [scaledX, scaledY];
-
+    return [scaledX, scaledY, scaledZ];
 }
 
 // Function to rescale coordinates
