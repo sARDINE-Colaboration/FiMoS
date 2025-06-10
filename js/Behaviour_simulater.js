@@ -64,7 +64,13 @@ var rescale_offset = 0; // offset to rescale the coordinates to fit the canvas
 // would be more efficient to just save the bbox
 var depth_map;
 var depth_map_points_idxs; // same dimensions as depth_map, connects the depth_map to depth_points
+var depth_points_length; // monitors the actual number of depth points (interpolated shore-line is added to depth_points)
+var depth_point_idx_to_triangle_starts;
+var max_depth_idx; 
 var depth_points; // are all non-NaN 3D points in depth_map
+var triangles; // triangles of depth map, each triangle is an array of three indices (of depth_points)
+var triangles_to_draw = []; // DEBUGGING
+var points_to_draw = []; // DEBUGGING
 var depth_map_colours;
 var renderedDepth;
 
@@ -105,6 +111,7 @@ var transition_probs = [ //only initial
     [0.5, 0, 0.5],  // probabilities from foraging to resting, foraging, active
     [0.5, 0.5, 0]   // probabilities from active to resting, foraging, active
 ];
+
 function generateTransitionProbs(dimension) {
     var transition_probs = new Array(dimension).fill(0).map(() => new Array(dimension).fill(0));
     var prob = 1 / (dimension - 1);
@@ -119,7 +126,6 @@ function generateTransitionProbs(dimension) {
 
     return transition_probs;
 }
-
 
 function calculateTransitionMatrix(transition_probs, sojourn_times){
     var prob_staying = [];
@@ -218,8 +224,6 @@ var upper_limits = new Vector(3,   3,    1.,   1,    1, 10, 5, 5);
 // patch_strength = 0.2; // attraction to food patches
 // strength_att = 0.2; // strength of attraction force
 // strength_align = 0.2; // strength of alignment force
-
-
 
 // Function to switch state
 function state_switch(fish){
@@ -353,9 +357,10 @@ class Fish {
         this.patch_sensing_length = 10; // sensing range for food patches in METER
         this.shore_time = 10;
         this.shore_strength = 5;
-        this.depth_time = 2;
-        this.depth_stength = 2;
+        this.depth_time = 3;
+        this.depth_stength = 10;
         this.shore_avoidance_sign = 0; // to avoid direction switching during shore-avoidance
+        this.ground_avoidance_sign = 0; // to avoid direction switching during ground-avoidance
         if (geojson) {
             this.createFish(id, geojson);
         }
@@ -400,6 +405,14 @@ class Fish {
             ).add(force_shore_repulsion
             ).add(force_surface_repulsion
             ).add(force_ground_repulsion);
+        // raise error if force is NaN and print the force
+        if (isNaN(force[0])){
+            console.log("force_social:", force_social, "force_patch_attraction:", force_patch_attraction, "force_shore_repulsion:", force_shore_repulsion, "force_surface_repulsion:", force_surface_repulsion, "force_ground_repulsion:", force_ground_repulsion);
+            console.log("Fish id:", this.id, "position", this.position,"velocity:", this.velocity, "force:", force, "speed_ms:", this.speed_ms, "phi:", this.phi, "theta:", this.theta);
+            // stop the simulation
+            throw new Error("NaN force detected for fish id: " + this.id);
+        }
+
         // define unit vectors
         var speed_ms = this.speed_ms, phi = this.phi, theta = this.theta;
         const cos_phi = Math.cos(phi), sin_phi = Math.sin(phi);
@@ -492,6 +505,9 @@ class Fish {
 
         // Calculate the depth ratio
         const depthRatio = Math.abs(this.position[2] / maxDepth); // Adjust maxDepth according to your global variable
+        // if (depthRatio > 1){
+        //     console.log("depthRatio is larger than 1, check maxDepth: ", depthRatio, this.position[2], maxDepth);
+        // }
 
         // Adjust the size of the triangle based on the depth
         const triangleSize = 15 - depthRatio * 10; // Decrease triangle size as the depth increases
@@ -588,16 +604,9 @@ class FoodPatch{
     }
 
     draw() {
-        
-        // Set color based on fish speed
         ctx.fillStyle = "white";
-
-        // Calculate the depth ratio
-        //const depthRatio = Math.abs(this.position[2] / maxDepth); // Adjust maxDepth according to your global variable
-
-        // Adjust the size of the triangle based on the depth
         const patchSize = 5 ;
-        // Draw a triangle representing the fish
+        // Draw a point representing the food patch 
         ctx.beginPath();
         const x = this.position[0], y = this.position[1];
         ctx.moveTo(x, y);
@@ -605,8 +614,6 @@ class FoodPatch{
         ctx.fill();
     }
 }
-
-
 
 // Function to animate the fish
 function animateFish() {
@@ -636,11 +643,41 @@ function animateFish() {
             fish.updatePosition(geojson.features[0].geometry.coordinates, dt);
         });
     }
+    
 
     // console.log("dist_matrix.length", dist_matrix.length);
     // if (FileSystemWritableFileStream.length > 1) {
     //     console.log("dist_matrix[0].length", dist_matrix[1].length);
     // }
+
+    // draw the points for debugging
+    if (points_to_draw.length > 0) {
+        ctx.fillStyle = "red";
+        for (let i = 0; i < points_to_draw.length; i++) {
+            const point = points_to_draw[i];
+            if (point.length < 2) {
+                console.error("Invalid point in points_to_draw:", point);
+                continue;
+            }
+            // Ensure the point has at least two coordinates
+            ctx.beginPath();
+            ctx.arc(point[0], point[1], 2, 0, Math.PI * 2);
+            ctx.fill();
+        }
+        //points_to_draw = []; // clear the points to draw for the next frame
+    }
+    
+
+    // draw the triangles 
+    for (let i = 0; i < triangles_to_draw.length; i++) {
+        const triangle = triangles_to_draw[i];
+        if (triangle.length === 3) {
+            drawTriangle(triangle);
+        } else {
+            console.error("Invalid triangle data:", triangle);
+        }
+    }
+    triangles_to_draw = []; // clear the triangles to draw for the next frame
 
     // draw each fish (at output time step dt_output = 1s)
     fishes.forEach(function (fish) {
@@ -650,6 +687,7 @@ function animateFish() {
     time_passed += dt_output;
     time_passed_stamp();
     drawScaleBar();
+
 
      //send error if geojson file is too small in dimensions
      if(bad_geojson){
@@ -663,6 +701,26 @@ function animateFish() {
     requestAnimationFrame(animateFish);
 
     
+}
+
+function drawTriangle(triangle){
+    ctx.fillStyle = "white";
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 0.1;
+    ctx.beginPath();
+    for (let i = 0; i < triangle.length; i++) {
+        const point = triangle[i];
+        if (point.length < 2) {
+            console.error("Invalid point in triangle:", point);
+            continue;
+        }
+        // Ensure the point has at least two coordinates
+        if (i === 0) ctx.moveTo(point[0], point[1]);
+        else ctx.lineTo(point[0], point[1]);
+    }
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
 }
 
 function time_passed_stamp(){
@@ -686,12 +744,13 @@ function time_passed_stamp(){
 
 function rescaleToGeoJSON(x, y, z) {
     // Scale the coordinates
+    let scaledX, scaledY;
     if (x_as_max_extent) {
-        const scaledX = (x)                  / pixel_per_meter + geojson_xlimits_ori[0];
-        const scaledY = (y - rescale_offset) / pixel_per_meter + geojson_ylimits_ori[0];
+        scaledX = (x)                                  / pixel_per_meter + geojson_xlimits_ori[0];
+        scaledY = (canvas.height - y + rescale_offset) / pixel_per_meter + geojson_ylimits_ori[0];
     } else {
-        const scaledX = (x - rescale_offset) / pixel_per_meter + geojson_xlimits_ori[0];
-        const scaledY = (y)                  / pixel_per_meter + geojson_ylimits_ori[0];
+        scaledX = (x - rescale_offset)                 / pixel_per_meter + geojson_xlimits_ori[0];
+        scaledY = (canvas.height - y)                  / pixel_per_meter + geojson_ylimits_ori[0];
     }
     const scaledZ = z / pixel_per_meter;
     return [scaledX, scaledY, scaledZ];
@@ -795,9 +854,11 @@ function drawLineString(coordinates) {
     }
     ctx.stroke();
 }
+
 function depthMapFromData(geojson) {
     // get a grid detailed depth map with depthResolution as grid-distance
     [depth_map, depth_map_points_idxs, depth_points] = sample_depth_map(geojson)
+    max_depth_idx = Math.max(...depth_map_points_idxs.flat().filter(d => !isNaN(d)));
     const flatDepths = depth_map.flat().filter(d => !isNaN(d));
     maxDepth = Math.min(...flatDepths);
     depth_map_colours = getDepthMapColors(depth_map);
@@ -810,10 +871,10 @@ function depthMapFromShoreDistance(geojson) {
     const depthMatrix = calculateDistanceToPolygon(geojson);
     depth_map = mapDepth(depthMatrix);
     [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map)
+    max_depth_idx = Math.max(...depth_map_points_idxs.flat().filter(d => !isNaN(d)));
     depth_map_colours = getDepthMapColors(depth_map);
     renderedDepth = makeDepthMapImageData(depth_map_colours);
 }
-
 
 function resetAndCreateFish(num, geojson) {
     if (!isNaN(num)) {
@@ -828,7 +889,6 @@ function resetAndCreateFish(num, geojson) {
 }
 
 // Function to handle file selection
-
 function handleGeoJSONFile(event) {
     const file = event.target.files[0];
     const reader = new FileReader();
@@ -850,7 +910,6 @@ function handleGeoJSONFile(event) {
     reader.readAsText(file);
 }
 
-
 function TestGeoJSONFile() {
     // the former version of this function only checked the limits of the first feature
     bad_geojson = false; // Reset to false
@@ -867,7 +926,6 @@ function TestGeoJSONFile() {
     }
     return bad_geojson;
 }
-
 
 function IntegrateGeoJSONShapeAndDepth() {
     // Convert geometry to LineString if it's not already
@@ -920,6 +978,9 @@ function IntegrateGeoJSONShapeAndDepth() {
     } else {
         depthMapFromShoreDistance(geojson); 
     }
+    depth_points_length = depth_points.length;
+    [depth_points, triangles] = triangulate_ground(depth_points, feature0.geometry.coordinates);
+    depth_point_idx_to_triangle_starts = mapDepthPointIdxToTriangleStarts(depth_points_length, triangles);
 
     //make new food patches
     makeFoodPatches();
@@ -927,7 +988,6 @@ function IntegrateGeoJSONShapeAndDepth() {
     // Draw the GeoJSON
     drawGeoJSON(geojson);
 }
-
 
 function InitialGeoJSONFile(filePath) {
     // Fetch the GeoJSON file from the provided filePath
@@ -974,8 +1034,6 @@ function drawScaleBar(){
     HUDctx.fillText(text, textX, textY); // Draw the text
 }
 
-
-
 // Function to compute the min and max values of a polygon
 function calculateMinMax_2D_matrix(polygon) {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -993,7 +1051,6 @@ function getColumn(matrix, col) {
     var coll = matrix.map(d => d[col]);
     return coll;
 }
-
 
 function calculateBbox(thegeojson) {
     let bbox = [Infinity, Infinity, -Infinity, -Infinity];
@@ -1045,25 +1102,173 @@ function lineSegmentIntersection(p1, p2, p3, p4) {
 }
 
 function surfaceRepulsionForce(fish, response_time, strength) {
-    const p = fish.position, v = fish.velocity, phi = fish.phi, theta = fish.theta;
+    const p = fish.position, v = fish.velocity, phi = fish.phi, theta = fish.theta, speed_ms = fish.speed_ms;
     const p_after_respTime = p.add(v.mul_scalar(response_time));
-    var force = new Vector(0, 0, 0);
-    const depth = p_after_respTime[2]; // depth > 0: fish in the air
-    if (depth > 0) {
-        force[2] = -strength * depth;
+    const jump = p_after_respTime[2]; // depth > 0: fish in the air
+    var force_theta = crossProduct([Math.cos(phi + Math.PI / 2),
+                                    Math.sin(phi + Math.PI / 2),
+                                    0], v); // if speed_ms == 0, force_theta = [0, 0, 0]
+    force_theta = new Vector(force_theta[0], force_theta[1], force_theta[2]);
+    if (speed_ms != 0) {
+        force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
+        if (force_theta[2] > 0) force_theta = force_theta.mul_scalar(-1); // ensure the force points downwards
     }
-    return force;
+    if (jump < 0) {
+        force_theta[0] = 0, force_theta[1] = 0, force_theta[2] = 0; // no force if future fish is below the surface
+    }
+    else {
+        force_theta[2] -= 1; // force direction is the combination of force_theta and -e_z
+        force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
+        var strength_scaled = strength; // default strength
+        if (p[2] < 0) { // if the fish is currently below the surface
+            const depth = Math.abs(p[2]); // positive depth value
+            strength_scaled = strength * (1 - depth / (jump + depth ) );
+        }
+        force_theta = force_theta.mul_scalar(strength_scaled); // scale the force
+    }
+    return force_theta;
 }
 
-// Dummy function that assumes fixed depth irrespective of the position 
-function groundRepulsionForce(fish, response_time, strength) {
-    const p = fish.position, v = fish.velocity, phi = fish.phi, theta = fish.theta;
-    const p_after_respTime = p.add(v.mul_scalar(response_time));
-    var force = new Vector(0, 0, 0);
-    const depth = p_after_respTime[2] - maxDepth; // depth < 0: fish in the earth 
-    if (depth < 0) {
-        force[2] = - strength * depth;
+function checkIfBelowGround(p, id) {
+    let xIndex = Math.round(p[0] / depthResolution);
+    let yIndex = Math.round(p[1] / depthResolution);
+    var depthIndex = NaN;
+    if (xIndex >= 0 && yIndex >= 0 && xIndex < depth_map_points_idxs[0].length && yIndex < depth_map_points_idxs.length) {
+        depthIndex = depth_map_points_idxs[yIndex][xIndex];
     }
+    // if depthIndex is NaN, the point is outside the depth map
+    if (isNaN(depthIndex)) {
+        return [0.9, new Vector(0, 0, 1)]; // fish outside depth map, ... go back to surface
+    }
+    const triangles_as_indices = getTrianglesFromPointIndices([depthIndex], triangles, depth_point_idx_to_triangle_starts);
+    const p_surface = [p[0], p[1], 0]; // surface position at the same x,y coordinates]
+    const [t_min, norm_min] = closestCollisionWithTriangle(p, p_surface, triangles_as_indices);
+    if (t_min < 1) {
+        // console.log("fish", id, "below ground at position", p, "with t_min", t_min, "and normal", norm_min);
+        points_to_draw.push([p[0], p[1]]); // for debugging purposes
+    }
+    return [t_min, norm_min];
+}
+
+function closestCollisionWithTriangle(p, p_next, triangles_as_indices){
+    // check if max indices of trangles_as_indices is lower or equal to length of depth_points
+    // get the closest triangle intersection
+    var t_min = 1.1; // if t>1 the lines do not intersect 
+    var norm_min = null;
+    for (let i = 0; i < triangles_as_indices.length; i++) {
+        const triangle = getTriangleCoords(triangles_as_indices[i], depth_points);
+        let [t, norm] = lineIntersectsTriangle(p, p_next, triangle);
+        if (t < t_min) {
+            triangles_to_draw.push(triangle); // for debugging purposes
+            t_min = t;
+            norm_min = norm;
+        }
+    }
+    // only normalize if collision is found
+    if (t_min <= 1) {
+        // normalize the normal vector
+        norm_min = new Vector(norm_min[0], norm_min[1], norm_min[2]);
+        norm_min = norm_min.div_scalar(norm_min.norm());
+        // ensure the right direction (always points upwards... no wall possible)
+        if (norm_min[2] < 0) {
+            norm_min = norm_min.mul_scalar(-1);
+        }
+    }
+    return [t_min, norm_min];
+}
+
+function groundRepulsionForce(fish, response_time, strength) {
+    const p = fish.position, v = fish.velocity, phi = fish.phi, theta = fish.theta, speed_ms = fish.speed_ms;
+    // force_theta is orthogonal to the force_phi and velocity 
+    var force_theta = crossProduct([Math.cos(phi + Math.PI / 2),
+                                    Math.sin(phi + Math.PI / 2),
+                                    0], v); 
+    force_theta = new Vector(force_theta[0], force_theta[1], force_theta[2]);
+    if (speed_ms != 0) {
+        force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
+        if (force_theta[2] < 0) force_theta = force_theta.mul_scalar(-1); // ensure the force points upwards
+    }
+    // if the fish is below the ground, apply full force upwards
+    const [t_below_ground, norm_below_ground] = checkIfBelowGround(p, fish.id);
+    if (-0.01 < t_below_ground && t_below_ground < 1.01) {
+        force_theta = force_theta.add(norm_below_ground);
+        force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
+        return force_theta.mul_scalar(strength);
+    }
+    const p_after_respTime = p.add(v.mul_scalar(*response_time));
+    // get the depth locations with conflicting depth
+    const indices2D = depthIndicesWithConflicts(p, p_after_respTime, depth_map)
+    var force = new Vector(0, 0, 0);
+    if (indices2D.length == 0 || fish.speed_ms == 0) {
+        return force; // no conflicting points, no force
+    }
+    // get the indices of the depth points
+    const indices = [...new Set(
+        indices2D.map((index) => depth_map_points_idxs[index[0]][index[1]])
+    )];
+    
+    // get the triangles associated to the indices (each triangle defined by three point indices)
+    const triangles_as_indices = getTrianglesFromPointIndices(indices, triangles, depth_point_idx_to_triangle_starts);
+    // check if max indices of trangles_as_indices is lower or equal to length of depth_points
+    // get the closest triangle intersection
+    var [t_min, norm_min] = closestCollisionWithTriangle(p, p_after_respTime, triangles_as_indices);
+    // NOTE PPK: I assume that the fish is always insidee the lake.... if outside, no triangle intersection is found and code fails
+    // if no triangle is found: there are two options:
+    //  A) the fish is outside the lake
+    //  B) the fish is inside the lake but no triangle is colliding (depthIndicesWithConflicts gives "maybe conflicts")
+    // in the following we assume that (A) never happens
+    if (t_min > 1) {
+        fish.ground_avoidance_sign = 0; // no ground avoidance
+        return force;
+    }
+    // phi_ground is the phi angle of the normal vector
+    const phi_ground = norm_min.phi();
+    var phi_force = 0;
+    if (fish.ground_avoidance_sign != 0 || fish.shore_avoidance_sign != 0){
+        if (fish.ground_avoidance_sign == 0) {
+            fish.ground_avoidance_sign = fish.shore_avoidance_sign; // if shore avoidance is active, use the same sign
+        }
+        // point perpendicular to fish-swimming direction + away from shore
+        phi_force = phi + fish.ground_avoidance_sign * Math.PI/2; 
+    }
+    else{
+        phi_force = phi + Math.PI/2; 
+        fish.ground_avoidance_sign = 1;
+        // if phi_force points not away from ground (=in same direction as phi_ground), flip the direction 
+        if (Math.cos(phi_force) * Math.cos(phi_ground) + Math.sin(phi_force) * Math.sin(phi_ground) < 0){
+            phi_force += Math.PI;
+            fish.ground_avoidance_sign = -1;
+        }
+    }
+    // PPK-note: the code below had the idea to split the force into two components: phi and theta
+    //      - to estimate on how to split the force into phi and theta, the code computed the orthogonal vectors spanning the triangle
+    //          - the orhto_xy vector is in the xy-plane and orthogonal to the normal vector
+    //          - the ortho_z vector is orthogonal to both the ortho_xy and the normal vector
+    //      - the phi_strength is the projection of the velocity onto the ortho_xy vector
+    //      - the theta_strength is the projection of the velocity onto the ortho_z vector
+
+    // // force direction:
+    // const force_phi = new Vector(Math.cos(phi_force), Math.sin(phi_force), 0);
+    // // the force is split in two components: phi and theta
+    // // the relative strength is such that the fish changes its intended direction only minimal to avoid the ground
+    // // --> if a tiny force_phi is needed in order to be parallel to the triangle --> most force goes into phi
+    // // in order to check this we compute the two orthogonal vector that span the triangle:
+    // //   ortho_xy: is in the xy-plane --> ortho_xy = crossProduct(norm_min, e_z)
+    // //   ortho_z: is orthogonal to ortho_xy and normal vector --> ortho_z = crossProduct(ortho_xy, norm_min)
+    // var ortho_xy = crossProduct(norm_min, [0, 0, 1]);
+    // ortho_xy = new Vector(ortho_xy[0], ortho_xy[1], ortho_xy[2]);
+    // ortho_xy = ortho_xy.div_scalar(ortho_xy.norm()); // normalize the vector
+    // const ortho_z = crossProduct(norm_min, ortho_xy);
+    // const phi_strength = Math.abs(v.dot(ortho_xy));
+    // const theta_strength = Math.abs(v.dot(ortho_z));
+    // force = force_phi.mul_scalar( strength * (phi_strength / (phi_strength + theta_strength)) * (1 - t_min) );
+    // force = force.add(
+    //       force_theta.mul_scalar( strength * (theta_strength / (phi_strength + theta_strength)) * (1 - t_min) )
+    // );
+    // reduces speed and points changes direction to upwards
+    force_theta = force_theta.add(norm_min);
+    force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
+    force = force_theta.mul_scalar( strength * (1 - t_min) );
     return force;
 }
 
@@ -1090,10 +1295,13 @@ function shoreRepulsionForce(fish, polygon, response_time, strength) {
         const vel_seg = new Vector(p1[0] - p2[0], p1[1]- p2[1]);
         var phi_force = vel_seg.phi() + Math.PI/2; // meant to point away from the shore + towards the fish
         // if norm points not towards the fish, flip the direction
-        if (Math.cos(phi_force) * Math.cos(phi) + Math.sin(phi_force) * Math.sin(phi) > 0){
+        if (Math.cos(phi_force) * Math.cos(phi) + Math.sin(phi_force) * Math.sin(phi) > 0){ // = normalized(v_fish) dot normalized(v_force)
             phi_force += Math.PI;
         }
-        if (fish.shore_avoidance_sign != 0){
+        if (fish.shore_avoidance_sign != 0 || fish.ground_avoidance_sign != 0){
+            if (fish.shore_avoidance_sign == 0) {
+                fish.shore_avoidance_sign = fish.ground_avoidance_sign; // if ground avoidance is active, use the same sign
+            }
             // point perpendicular to fish-swimming direction + away from shore
             var phi_force2 = fish.phi + fish.shore_avoidance_sign * Math.PI/2; 
         }
@@ -1106,11 +1314,10 @@ function shoreRepulsionForce(fish, polygon, response_time, strength) {
                 fish.shore_avoidance_sign = -1;
             }
         }
-        // force[0] = Math.cos(phi_force) + 2 * Math.cos(phi_force2); 
-        // force[1] = Math.sin(phi_force) + 2 * Math.sin(phi_force2); 
+        // force direction:
         force[0] = Math.cos(phi_force2); 
         force[1] = Math.sin(phi_force2); 
-        force = force.mul_scalar( strength * (1 - intersection_distance_in_t) / force.norm());
+        force = force.mul_scalar( strength * (1 - intersection_distance_in_t) );
     }
     else {
         fish.shore_avoidance_sign = 0;
@@ -1194,8 +1401,6 @@ function socialForce(fish, strength_att, strength_align) {
     }
 }
 
-
-
 // Function to calculate distance between two points
 function calculateDistance(x1, y1, x2, y2) {
     return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
@@ -1220,7 +1425,6 @@ function makeFoodPatches(){
              console.log("no geojson file");
          }
 }
-
 
 // Function to check if a point lies inside a polygon using ray casting algorithm
 // note: this function could be generalized to return the distance to the shore

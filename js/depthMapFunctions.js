@@ -24,6 +24,7 @@ function calculateDistanceToPolygon(geojson) {
     return matrix;
 }
 
+// this function takes a matrix of depth values and returns a matrix of indices and a list of points
 function getMatrixIndicesAndPoints(matrix) {
     // Create an empty matrix to store distances
     const matrix_indices = [];  
@@ -53,21 +54,20 @@ function depthIndicesWithConflicts(xyz, xyz_next, depth_map){
     // get the indices of the points in the depth map with resolution depthResolution
     let xIndex = Math.round(xyz[0] / depthResolution);
     let yIndex = Math.round(xyz[1] / depthResolution);
+    const N_x = depth_map[0].length;
+    const N_y = depth_map.length;
 
-    // the the indices of the next point + 1 (triangle edge) and subtract 1 from the current point
+    const xIndex_next = Math.round(xyz_next[0] / depthResolution);
+    const yIndex_next = Math.round(xyz_next[1] / depthResolution);
+    // now take the min and max of the indices to get the submatrix
+    // ensure to take the next neighbors in as well, so we substract/add 1 to the start/end indices
+    const xStart = Math.max(Math.min(xIndex, xIndex_next) - 1, 0);
+    const xEnd = Math.min(Math.max(xIndex, xIndex_next) + 1, N_x - 1);
+    const yStart = Math.max(Math.min(yIndex, yIndex_next) -1, 0);
+    const yEnd = Math.min(Math.max(yIndex, yIndex_next) + 1, N_y - 1);
+    // the indices of the next point + 1 (triangle edge) and subtract 1 from the current point
     // PPK-note: could be problematic because the additional 1 might go out of canvas bounds
     //           -solution: xStart = Math.max(0, xStart), ...;
-    const dx = xyz_next[0] - xyz[0];
-    const dy = xyz_next[1] - xyz[1];
-    const xIndex_next = Math.round(xyz_next[0] / depthResolution) + 1 * Math.sign(dx);
-    const yIndex_next = Math.round(xyz_next[1] / depthResolution) + 1 * Math.sign(dy);
-    xIndex -= Math.sign(dx);
-    yIndex -= Math.sign(dy); 
-    // now take the min and max of the indices to get the submatrix
-    const xStart = Math.min(xIndex, xIndex_next);
-    const xEnd = Math.max(xIndex, xIndex_next);
-    const yStart = Math.min(yIndex, yIndex_next);
-    const yEnd = Math.max(yIndex, yIndex_next);
     // Extract the submatrix using slice (like numpy's depth_map[yStart:yEnd+1, xStart:xEnd+1])
     const subMatrix = depth_map.slice(yStart, yEnd + 1).map(row => row.slice(xStart, xEnd + 1));
 
@@ -80,12 +80,32 @@ function depthIndicesWithConflicts(xyz, xyz_next, depth_map){
         // return the indices of the submatrix whose depths are larger than the depth reference
         for (let i = 0; i < subMatrix.length; i++) {
             for (let j = 0; j < subMatrix[i].length; j++) {
-                if (subMatrix[i][j] > depth_reference) {
-                    conflictIndices.push([yStart + i, xStart + j]);
+                let idx_x = xStart + j;
+                let idx_y = yStart + i;
+                if (isNaN(subMatrix[i][j])) continue; // skip NaN values
+                // include if depth is larger than current depth, or if at the border
+                conflictIndices.push([idx_y, idx_x]);
+                if (subMatrix[i][j] > depth_reference || idx_x == 0 || idx_y == 0 || idx_x == N_x - 1 || idx_y == N_y - 1) {
+                    conflictIndices.push([idx_y, idx_x]);
+                }
+                else if (0 < i && i < subMatrix.length - 1 && 0 < j && j < subMatrix[i].length - 1) {
+                    // include if the point has a NaN neighbor
+                    if (isNaN(subMatrix[i - 1][j]) ||
+                        isNaN(subMatrix[i + 1][j]) ||
+                        isNaN(subMatrix[i][j - 1]) ||
+                        isNaN(subMatrix[i][j + 1]) ||
+                        isNaN(subMatrix[i + 1][j + 1]) ||
+                        isNaN(subMatrix[i - 1][j + 1]) ||
+                        isNaN(subMatrix[i + 1][j - 1]) ||
+                        isNaN(subMatrix[i - 1][j - 1])
+                    ) {
+                        conflictIndices.push([idx_y, idx_x]);
+                    }
                 }
             }
         }
     }
+    // now add those indices with a neighbor NaN
     return conflictIndices;
 }
 
@@ -196,6 +216,8 @@ function pointToSegmentDistance(point, p1, p2) {
 }
 
 function mapDepth(matrix) {  
+    // ATTENTION: THIS IS MESSY. IF maxDepth < 0, the maxCombinedValue are actually the min
+    // TODO ..... write it better (assume only min values from the start)
     // Rescale depth matrix
     const maxDepthValue = Math.max(...matrix.flat().filter(value => !isNaN(value)));
     const scaledDepthMatrix = matrix.map(row => 
@@ -215,12 +237,12 @@ function mapDepth(matrix) {
             const noise1 = noiseMatrix1[y][x];
             const noise2 = noiseMatrix2[y][x];
             const noise3 = noiseMatrix3[y][x];
-            return !isNaN(value) ? value + noise1 + noise2 + noise3 : NaN;
+            return !isNaN(value) ? value - noise1 - noise2 - noise3 : NaN;
         })
     );
 
     // Rescale combined matrix to keep depth between 0 and maxDepth
-    const maxCombinedValue = Math.max(...combinedMatrix.flat().filter(value => !isNaN(value)));
+    const maxCombinedValue = Math.min(...combinedMatrix.flat().filter(value => !isNaN(value)));
     const rescaledMatrix = combinedMatrix.map(row => 
         row.map(value => 
             !isNaN(value) ? (value / maxCombinedValue) * maxDepth : NaN
@@ -353,17 +375,43 @@ function makeDepthMapImageData(colors) {
     return imgData;
 }
 
-/**
- * Performs Delaunay triangulation on a set of 3D ground points and returns a list of triangles.
- *
- * @param {Array<Array<number>>} points - An array of 3D points, where each point is an array of the form [x, y, z].
- * @returns {Array<Array<Array<number>>>} An array of triangles, each represented as an array of three [x, y, z] points.
- *
- * @note The input `points` array must contain at least three points, each formatted as [x, y, z].
- */
-function triangulate_ground(points) {
+// function that returns the points of the shoreline but if the distance is larger than depthResolution, it interpolates the missing points
+function pointsOfShorelineInterpolated(coordinates) {
+    const shorelinePoints = [];
+    for (let i = 0; i < coordinates.length - 1; i++) {
+        const start = coordinates[i];
+        const end = coordinates[i + 1];
+        shorelinePoints.push([start[0], start[1], 0]); // Add the start point with z = 0
+        
+        // Calculate the distance between the two points
+        const dx = end[0] - start[0];
+        const dy = end[1] - start[1];
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        // If the distance is greater than depthResolution, interpolate points
+        if (distance > depthResolution) {
+            const numPoints = Math.ceil(distance / depthResolution);
+            for (let j = 1; j < numPoints; j++) {
+                const interpolatedX = start[0] + (dx * j) / numPoints;
+                const interpolatedY = start[1] + (dy * j) / numPoints;
+                shorelinePoints.push([interpolatedX, interpolatedY, 0]);
+            }
+        }
+    }
+    const lastPoint = coordinates[coordinates.length - 1];
+    shorelinePoints.push([lastPoint[0], lastPoint[1], 0]); // Add the last point
+    return shorelinePoints;
+}
+
+// Performs Delaunay triangulation on a set of 3D ground points and returns a list of triangles.
+function triangulate_ground(depth_points, shore_points){
+    // interpolate shore points to ensure they are evenly spaced
+    const shore_points_interpolated = pointsOfShorelineInterpolated(shore_points);
+    // Combine depth points and shore points
+    const combinedPoints = [...depth_points, ...shore_points_interpolated];
+
     // Extract 2D coordinates for triangulation
-    const coords2D = points.map(p => [p[0], p[1]]);
+    const coords2D = combinedPoints.map(p => [p[0], p[1]]);
 
     // Create the Delaunay triangulation
     const delaunay = d3.Delaunay.from(coords2D);
@@ -372,15 +420,117 @@ function triangulate_ground(points) {
     const triangles = delaunay.triangles; // flat array: [i0, i1, i2, i3, i4, i5, ...]
     // Each consecutive triple is a triangle: [i0, i1, i2] is the first triangle, etc.
 
-    // To get the actual 3D triangles:
-    const triangleList = [];
-    for (let i = 0; i < triangles.length; i += 3) {
-        triangleList.push([
-            points[triangles[i]],
-            points[triangles[i + 1]],
-            points[triangles[i + 2]]
-        ]);
+    return [combinedPoints, triangles];
+}
+
+// Function to get a mapping of point index to triangles
+function mapDepthPointIdxToTriangleStarts(depth_points_length, triangles){
+    // create empty array of arrays, where each index corresponds to a point index
+    const pointIdxToTriangleMap = Array.from({ length: depth_points_length }, () => []);
+    // fill the map with triangle start indices for each point index
+    for (let i = 0; i < triangles.length; i++) {
+        let triangle_startIdx = Math.floor(i / 3) * 3; // Each triangle consists of 3 indices
+        let pt_idx = triangles[i];
+        if (pt_idx < depth_points_length) {
+            pointIdxToTriangleMap[pt_idx].push(triangle_startIdx);
+        }
     }
-    // triangleList is now an array of triangles, each triangle is an array of 3 [x, y, z] points
-    return triangleList;
+    // remove duplicates (should not be necessary)
+    for (let i = 0; i < pointIdxToTriangleMap.length; i++) {
+        pointIdxToTriangleMap[i] = [...new Set(pointIdxToTriangleMap[i])];
+    }
+    return pointIdxToTriangleMap;
+}
+
+function getTrianglesFromPointIndices(indices, triangles, indices_to_triangle_start) {
+    // find location of indices in the triangles array
+    const triangle_start_indices = [];
+    for (let i = 0; i < indices.length; i++) {
+        // Find all indices of idx[i] in triangles
+        try {
+            triangle_start_indices.push(...indices_to_triangle_start[indices[i]]);
+        } catch (e) {
+            if (e instanceof TypeError) {
+                console.log('ERROR, there is no entry in indices_to_triangle_start at: ', indices[i]);
+                console.log('indices are: ', indices);
+                console.log('indices_to_triangle_start.length: ', indices_to_triangle_start.length);
+            } else {
+                throw e;
+            }
+        }
+    }
+    // remove duplicates
+    const unique_triangle_start_indices = [...new Set(triangle_start_indices)];
+    // Now extract the triangles from the unique indices
+    const triangles_as_points_indices = unique_triangle_start_indices.map(index => {
+        return [
+            triangles[index],
+            triangles[index + 1],
+            triangles[index + 2]
+        ];
+    });
+    // output is array of triangles, where each triangle is an array of point indices
+    // e.g. [[0, 1, 2], [3, 4, 5], ...]
+    return triangles_as_points_indices;
+}
+
+function getTriangleCoords(triangle, points) {
+    // Extract the coordinates of the triangle vertices
+    const p1 = points[triangle[0]];
+    const p2 = points[triangle[1]];
+    const p3 = points[triangle[2]];
+    return [p1, p2, p3];
+}
+
+function crossProduct(a, b) {
+    return [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0]
+    ];
+}
+
+function dotProduct(v1, v2) {
+    return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
+}
+
+function lineIntersectsTriangle(lineStart, lineEnd, triangle) {
+    // Extract triangle vertices
+    const [v0, v1, v2] = triangle;
+
+    // Convert line segment to vector form (reversed direction)
+    const lineDir_n = [lineStart[0] - lineEnd[0], lineStart[1] - lineEnd[1], lineStart[2] - lineEnd[2]];
+    
+    // Compute edges of the triangle
+    const edge1 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
+    const edge2 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+    // Compute the normal of the triangle
+    const normal = crossProduct(edge1, edge2);
+
+    // Check if the line is parallel to the triangle plane
+    const lineDirN_dot_norm = dotProduct(lineDir_n, normal);
+    if (Math.abs(lineDirN_dot_norm) < 1e-5) {
+        return [1.5, normal]; // Line is parallel to the triangle plane
+    }
+
+    // Find intersection point with the triangle plane: following https://en.wikipedia.org/wiki/Line%E2%80%93plane_intersection
+    // computing t, u, v
+    const ls_minus_v0 = [lineStart[0] - v0[0], lineStart[1] - v0[1], lineStart[2] - v0[2]];
+    const t =  dotProduct(normal, ls_minus_v0) / lineDirN_dot_norm;
+    if (t < 0 || t > 1) {
+        return [1.5, normal]; // Intersection point is outside the segment
+    }
+
+    const u = dotProduct(crossProduct(edge2, lineDir_n), ls_minus_v0) / lineDirN_dot_norm;
+    //if (u < 0 || u > 1) {
+    if (u < -0.1 || u > 1.1) { // condition is relaxed, actually it is for u>1, but we allow a small margin
+        return [1.5, normal]; // Intersection point is outside the segment
+    }
+    
+    const v = dotProduct(crossProduct(lineDir_n, edge1), ls_minus_v0) / lineDirN_dot_norm;
+    // if (u + v < 0 || u + v > 1) {
+    if (u + v < -0.2 || u + v > 1.2) { // condition is relaxed, actually it is for u+v>1, but we allow a small margin
+        return [1.5, normal]; // Intersection point is outside the segment
+    }
+    return [t, normal];
 }
