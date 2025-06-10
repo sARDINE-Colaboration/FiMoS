@@ -444,7 +444,8 @@ class Fish {
         }
         this.phi = phi, this.theta = theta, this.speed_ms = speed_ms; //apply newly calculated parameters this fish
         // update velocity vector
-        this._computeVelocity_inPixelPerSec() // use parameters to update vector
+        this._computeVelocity_inPixelPerSec(); // use parameters to update vector
+        this._preventGroundCollision();
         // Update position based on current velocity
         this.position = this.position.add(this.velocity.mul_scalar(dt));
         this.stayInPolygon(polygonCoordinates);
@@ -462,6 +463,44 @@ class Fish {
             // now the fish is inside the polygon and points in the opposite direction
         }
     }
+
+    _preventGroundCollision() {
+        const p = this.position, v = this.velocity, speed_ms = this.speed_ms;
+        // const p = fish.position, v = fish.velocity, phi = fish.phi, theta = fish.theta, speed_ms = fish.speed_ms;
+        // check if the fish is below the ground
+        const p_next = p.add(v.mul_scalar(dt));
+        // get the depth locations with conflicting depth
+        const indices2D = depthIndicesWithConflicts(p, p_next, depth_map)
+        if (indices2D.length == 0 || speed_ms == 0) {
+            return;
+        }
+        // get the indices of the depth points
+        const indices = [...new Set(
+            indices2D.map((index) => depth_map_points_idxs[index[0]][index[1]])
+        )];
+    
+        // get the triangles associated to the indices (each triangle defined by three point indices)
+        const triangles_as_indices = getTrianglesFromPointIndices(indices, triangles, depth_point_idx_to_triangle_starts);
+        // check if max indices of trangles_as_indices is lower or equal to length of depth_points
+        // get the closest triangle intersection
+        var [t_min, norm_min] = closestCollisionWithTriangle(p, p_next, triangles_as_indices);
+        if (0 < t_min && t_min < 1.05){
+            // projection of the velocity on the normal of the triangle
+            const projection_v = norm_min.dot(v);
+            // it should always be negative, otherwise the fish would swim from under the ground to above
+            if (projection_v > 0) {
+                console.warn("Fish id:", this.id, "is colliding with the ground, but projection is positive --> returns to above the ground");
+                return;
+            }
+            // correct the velocity vector:
+            console.log("Fish id:", this.id, "is colliding with the ground, correcting velocity vector");
+            this.velocity = this.velocity.add(norm_min.mul_scalar(-projection_v));
+            this.phi = this.velocity.phi();
+            this.theta = this.velocity.theta();
+            this.speed_ms = this.velocity.norm() / pixel_per_meter; // convert to speed in METER / sec
+        }
+    }
+
     _computeVelocity_inPixelPerSec() {
         this.velocity[0] = Math.cos(this.phi) * Math.sin(this.theta);
         this.velocity[1] = Math.sin(this.phi) * Math.sin(this.theta);
@@ -981,6 +1020,7 @@ function IntegrateGeoJSONShapeAndDepth() {
     depth_points_length = depth_points.length;
     [depth_points, triangles] = triangulate_ground(depth_points, feature0.geometry.coordinates);
     depth_point_idx_to_triangle_starts = mapDepthPointIdxToTriangleStarts(depth_points_length, triangles);
+    console.log("maxDepth: ", maxDepth, "pixel_per_meter:", pixel_per_meter, 'maxDepth in meters:', maxDepth / pixel_per_meter);
 
     //make new food patches
     makeFoodPatches();
@@ -1153,19 +1193,19 @@ function checkIfBelowGround(p, id) {
 function closestCollisionWithTriangle(p, p_next, triangles_as_indices){
     // check if max indices of trangles_as_indices is lower or equal to length of depth_points
     // get the closest triangle intersection
-    var t_min = 1.1; // if t>1 the lines do not intersect 
+    var t_min = 1.2; // if t>1 the lines do not intersect 
     var norm_min = null;
     for (let i = 0; i < triangles_as_indices.length; i++) {
         const triangle = getTriangleCoords(triangles_as_indices[i], depth_points);
         let [t, norm] = lineIntersectsTriangle(p, p_next, triangle);
+        triangles_to_draw.push(triangle); // for debugging purposes
         if (t < t_min) {
-            triangles_to_draw.push(triangle); // for debugging purposes
             t_min = t;
             norm_min = norm;
         }
     }
     // only normalize if collision is found
-    if (t_min <= 1) {
+    if (t_min <= 1.1) {
         // normalize the normal vector
         norm_min = new Vector(norm_min[0], norm_min[1], norm_min[2]);
         norm_min = norm_min.div_scalar(norm_min.norm());
@@ -1195,7 +1235,7 @@ function groundRepulsionForce(fish, response_time, strength) {
         force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
         return force_theta.mul_scalar(strength);
     }
-    const p_after_respTime = p.add(v.mul_scalar(*response_time));
+    const p_after_respTime = p.add(v.mul_scalar(response_time));
     // get the depth locations with conflicting depth
     const indices2D = depthIndicesWithConflicts(p, p_after_respTime, depth_map)
     var force = new Vector(0, 0, 0);
