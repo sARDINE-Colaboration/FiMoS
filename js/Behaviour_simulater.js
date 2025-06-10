@@ -66,7 +66,6 @@ var depth_map;
 var depth_map_points_idxs; // same dimensions as depth_map, connects the depth_map to depth_points
 var depth_points_length; // monitors the actual number of depth points (interpolated shore-line is added to depth_points)
 var depth_point_idx_to_triangle_starts;
-var max_depth_idx; 
 var depth_points; // are all non-NaN 3D points in depth_map
 var triangles; // triangles of depth map, each triangle is an array of three indices (of depth_points)
 var triangles_to_draw = []; // DEBUGGING
@@ -896,12 +895,10 @@ function drawLineString(coordinates) {
 
 function depthMapFromData(geojson) {
     // get a grid detailed depth map with depthResolution as grid-distance
-    [depth_map, depth_map_points_idxs, depth_points] = sample_depth_map(geojson)
-    max_depth_idx = Math.max(...depth_map_points_idxs.flat().filter(d => !isNaN(d)));
+    depth_map = sample_depth_map(geojson);
+    [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map);
     const flatDepths = depth_map.flat().filter(d => !isNaN(d));
     maxDepth = Math.min(...flatDepths);
-    depth_map_colours = getDepthMapColors(depth_map);
-    renderedDepth = makeDepthMapImageData(depth_map_colours);
 }
 
 function depthMapFromShoreDistance(geojson) {
@@ -910,7 +907,6 @@ function depthMapFromShoreDistance(geojson) {
     const depthMatrix = calculateDistanceToPolygon(geojson);
     depth_map = mapDepth(depthMatrix);
     [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map)
-    max_depth_idx = Math.max(...depth_map_points_idxs.flat().filter(d => !isNaN(d)));
     depth_map_colours = getDepthMapColors(depth_map);
     renderedDepth = makeDepthMapImageData(depth_map_colours);
 }
@@ -1017,10 +1013,13 @@ function IntegrateGeoJSONShapeAndDepth() {
     } else {
         depthMapFromShoreDistance(geojson); 
     }
+    // color the ground
+    depth_map_colours = getDepthMapColors(depth_map);
+    renderedDepth = makeDepthMapImageData(depth_map_colours);
+    // triangulate the ground
     depth_points_length = depth_points.length;
     [depth_points, triangles] = triangulate_ground(depth_points, feature0.geometry.coordinates);
     depth_point_idx_to_triangle_starts = mapDepthPointIdxToTriangleStarts(depth_points_length, triangles);
-    console.log("maxDepth: ", maxDepth, "pixel_per_meter:", pixel_per_meter, 'maxDepth in meters:', maxDepth / pixel_per_meter);
 
     //make new food patches
     makeFoodPatches();
@@ -1198,8 +1197,8 @@ function closestCollisionWithTriangle(p, p_next, triangles_as_indices){
     for (let i = 0; i < triangles_as_indices.length; i++) {
         const triangle = getTriangleCoords(triangles_as_indices[i], depth_points);
         let [t, norm] = lineIntersectsTriangle(p, p_next, triangle);
-        triangles_to_draw.push(triangle); // for debugging purposes
         if (t < t_min) {
+            triangles_to_draw.push(triangle); // for debugging purposes
             t_min = t;
             norm_min = norm;
         }

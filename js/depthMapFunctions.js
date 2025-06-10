@@ -66,43 +66,18 @@ function depthIndicesWithConflicts(xyz, xyz_next, depth_map){
     const yStart = Math.max(Math.min(yIndex, yIndex_next) -1, 0);
     const yEnd = Math.min(Math.max(yIndex, yIndex_next) + 1, N_y - 1);
     // the indices of the next point + 1 (triangle edge) and subtract 1 from the current point
-    // PPK-note: could be problematic because the additional 1 might go out of canvas bounds
-    //           -solution: xStart = Math.max(0, xStart), ...;
     // Extract the submatrix using slice (like numpy's depth_map[yStart:yEnd+1, xStart:xEnd+1])
     const subMatrix = depth_map.slice(yStart, yEnd + 1).map(row => row.slice(xStart, xEnd + 1));
 
     // now check if the current and next depth are 
-    const depth_reference = Math.min(xyz[2], xyz_next[2]);
-    const min_depth_submatrix = Math.min(...subMatrix.flat().filter(value => !isNaN(value)));
     const conflictIndices = [];
-    // if the min depth in the submatrix is greater than the depth reference, there is a conflict
-    if (min_depth_submatrix > depth_reference) {
-        // return the indices of the submatrix whose depths are larger than the depth reference
-        for (let i = 0; i < subMatrix.length; i++) {
-            for (let j = 0; j < subMatrix[i].length; j++) {
-                let idx_x = xStart + j;
-                let idx_y = yStart + i;
-                if (isNaN(subMatrix[i][j])) continue; // skip NaN values
-                // include if depth is larger than current depth, or if at the border
-                conflictIndices.push([idx_y, idx_x]);
-                if (subMatrix[i][j] > depth_reference || idx_x == 0 || idx_y == 0 || idx_x == N_x - 1 || idx_y == N_y - 1) {
-                    conflictIndices.push([idx_y, idx_x]);
-                }
-                else if (0 < i && i < subMatrix.length - 1 && 0 < j && j < subMatrix[i].length - 1) {
-                    // include if the point has a NaN neighbor
-                    if (isNaN(subMatrix[i - 1][j]) ||
-                        isNaN(subMatrix[i + 1][j]) ||
-                        isNaN(subMatrix[i][j - 1]) ||
-                        isNaN(subMatrix[i][j + 1]) ||
-                        isNaN(subMatrix[i + 1][j + 1]) ||
-                        isNaN(subMatrix[i - 1][j + 1]) ||
-                        isNaN(subMatrix[i + 1][j - 1]) ||
-                        isNaN(subMatrix[i - 1][j - 1])
-                    ) {
-                        conflictIndices.push([idx_y, idx_x]);
-                    }
-                }
-            }
+    // return the indices of the submatrix whose depths are larger than the depth reference
+    for (let i = 0; i < subMatrix.length; i++) {
+        for (let j = 0; j < subMatrix[i].length; j++) {
+            let idx_y = yStart + i;
+            let idx_x = xStart + j;
+            if (isNaN(subMatrix[i][j])) continue; // skip NaN values
+            conflictIndices.push([idx_y, idx_x]);
         }
     }
     // now add those indices with a neighbor NaN
@@ -123,38 +98,28 @@ function sample_depth_map(geojson) {
     const limitedDepthCoordinates = depthCoordinates.slice(0, 1000); // Use only the first 1000 entries
     const min_depth = Math.min(...limitedDepthCoordinates.map(coord => coord[2])); // Get the minimum depth from the limited coordinates
     var sign_factor = 1;
-    if (min_depth > 0) {
+    if (min_depth >= 0) {
         sign_factor = -1; // If the minimum depth is positive, we assume the depth values are negative
     }
     
     // Create an empty matrix to store distances
     const matrix = [];
-    const matrix_indices = [];
-    const depth_points = [];
-    var valid_value_counter = 0;
     
     // Loop through each point inside the bounding box of the polygon
     for (let y = 0; y <= canvas.height; y+=depthResolution) {
         const row = [];
-        const row_indices = [];
         for (let x = 0; x <= canvas.width; x+=depthResolution) {
             if(pointInsidePolygon([x, y], polygonCoordinates)){
                 //polygonCoordinates must be flattened for the pointToPolygonDistance function **note!
-                const depth = getDepthOfClosestMultipoint([x, y], depthCoordinates);
-                row.push(sign_factor * depth);
-                row_indices.push(valid_value_counter);
-                valid_value_counter++;
-                const point = [x * depthResolution, y * depthResolution, depth];
-                depth_points.push(point);
+                const depth = sign_factor * getDepthOfClosestMultipoint([x, y], depthCoordinates);
+                row.push(depth);
             } else {
                 row.push(NaN);   
-                row_indices.push(NaN);
             }
         }
         matrix.push(row);
-        matrix_indices.push(row_indices);
     }
-    return [matrix, matrix_indices, depth_points];
+    return matrix;
 }
 
 function getDepthOfClosestMultipoint(point, multiPoint) {
