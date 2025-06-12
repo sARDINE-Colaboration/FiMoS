@@ -19,13 +19,13 @@ resulting in a parameter vector $\Theta^{(k)}$ for each state $ k \in \{1, \dots
 
 $$
 \Theta^{(k)} = \left( 
-\beta ^{(k)}, \; 
-v _0 ^{(k)}, \; 
-D _{\varphi} ^{(k)}, \; 
-D _{\theta} ^{(k)}, \; 
-D _v ^{(k)}, \; 
-\mu _{\mathrm{patchatt}} ^{(k)}, \; 
-\mu _{\mathrm{att}} ^{(k)}, \; 
+\beta ^{(k)} \; 
+v _0 ^{(k)} \; 
+D _{\varphi} ^{(k)} \; 
+D _{\theta} ^{(k)} \; 
+D _v ^{(k)} \; 
+\mu _{\mathrm{patchatt}} ^{(k)} \; 
+\mu _{\mathrm{att}} ^{(k)} \; 
 \mu _{\mathrm{ali}}^{(k)}
 \right)
 $$
