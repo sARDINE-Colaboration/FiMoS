@@ -4,16 +4,12 @@
 
 We assume the fish to have a repertoire of $K$ behavioral states. The movement parameters vary between states which are defined by the following state-specific parameters
 
-$$
-\begin{itemize}
-   
-    \item speed relaxation coefficient $ \beta $,
-     \item preferred speed $ v _0 $,
-    \item diffusion coefficients $ D _{\varphi} $, $ D _{\theta} $, and $ D _v $, 
-    \item patch attraction strength $ \mu _{\mathrm{patchatt}} $,
-    \item social force parameters $ \mu _{\mathrm{att}} $ and $ \mu _{\mathrm{ali}} $, representing attraction and alignment strengths,
-\end{itemize}
-$$
+- speed relaxation coefficient $ \beta $,
+- preferred speed $ v _0 $,
+- diffusion coefficients $ D _{\varphi} $, $ D _{\theta} $, and $ D _v $, 
+- patch attraction strength $ \mu _{\mathrm{patchatt}} $,
+- social force parameters $ \mu _{\mathrm{att}} $ and $ \mu _{\mathrm{ali}} $, representing attraction and alignment strengths,
+
 
 resulting in a parameter vector $\Theta^{(k)}$ for each state $ k \in \{1, \dots, K\} $:
 
@@ -37,7 +33,7 @@ $$
 
 A simple Markov chain is used for simulating the state dynamics.
 At each second, a draw from the transition probability matrix $\Gamma$ determines what the next state is going to be. 
-For each state $ k $, a sojourn time $ \tau _k $  is specified, indicating the average time (in minutes) spent in this state before switching. If a fish switches state, it is equally likely to switch to any of the other activated states. This means that the sojourn times $ \bm{\tau} = (\tau _1, \dots, \tau _K) $ solely govern the state transitions and the duration of staying in the same state follows a geometric distribution with the mean given by the respective sojourn time.
+For each state $ k $, a sojourn time $ \tau _k $  is specified, indicating the average time (in minutes) spent in this state before switching. If a fish switches state, it is equally likely to switch to any of the other activated states. This means that the sojourn times $ \boldsymbol{\tau} = (\tau _1, \dots, \tau _K) $ solely govern the state transitions and the duration of staying in the same state follows a geometric distribution with the mean given by the respective sojourn time.
 
 The transition probability matrix $ \Gamma $ is defined as:
 
