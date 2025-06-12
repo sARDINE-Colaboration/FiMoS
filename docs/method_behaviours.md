@@ -54,7 +54,7 @@ $$
 Where each diagonal element (probability of staying in a state) is given by:
 
 $$
-\gamma _{kk} = \frac{1}{\tau _k \cdot 60} 
+\gamma _{kk} = 1 - \frac{1}{\tau _k \cdot 60} 
 $$
 
 And the off-diagonal elements for $k, l \in \{1, \dots, K\}$ and $k \neq l$ are:
