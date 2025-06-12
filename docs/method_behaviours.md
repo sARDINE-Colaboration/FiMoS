@@ -33,7 +33,7 @@ $$
 
 A simple Markov chain is used for simulating the state dynamics.
 At each second, a draw from the transition probability matrix $\Gamma$ determines what the next state is going to be. 
-For each state $ k $, a sojourn time $ \tau _k $  is specified, indicating the average time (in minutes) spent in this state before switching. If a fish switches state, it is equally likely to switch to any of the other activated states. This means that the sojourn times $ \boldsymbol{\tau} = (\tau _1, \dots, \tau _K) $ solely govern the state transitions and the duration of staying in the same state follows a geometric distribution with the mean given by the respective sojourn time.
+For each state $ k $, a sojourn time $ \tau _k $  is specified, indicating the average time (in minutes) spent in this state before switching. If a fish switches state, it is equally likely to switch to any of the other activated states. This means that the sojourn times $ \tau = (\tau _1, \dots, \tau _K) $ solely govern the state transitions and the duration of staying in the same state follows a geometric distribution with the mean given by the respective sojourn time.
 
 The transition probability matrix $ \Gamma $ is defined as:
 
@@ -76,7 +76,7 @@ $$
   \begin{array}{ll}
     L, & \text{if } \hat{\Theta}^{(k,i)} < 0, \\
     U, & \text{if } \hat{\Theta}^{(k,i)} > 1, \\
-    \hat{\Theta}^{(k,i)} \cdot (\bm{U} - \bm{L}) + \bm{L}, & else.
+    \hat{\Theta}^{(k,i)} \cdot (U - L) + L, & else.
   \end{array}
 \right.
 $$
