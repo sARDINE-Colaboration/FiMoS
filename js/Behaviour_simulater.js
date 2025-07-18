@@ -363,6 +363,7 @@ class Fish {
         if (geojson) {
             this.createFish(id, geojson);
         }
+        this.debug_sign = 1; // used for debugging if debug_sin = -1: something is wrong
     }
 
     createFish(id, geojson) {
@@ -443,11 +444,17 @@ class Fish {
         }
         this.phi = phi, this.theta = theta, this.speed_ms = speed_ms; //apply newly calculated parameters this fish
         // update velocity vector
+        const speed_ms_before = this.speed_ms;
         this._computeVelocity_inPixelPerSec(); // use parameters to update vector
+        this._preventGroundCollision();
+        this._preventGroundCollision();
         this._preventGroundCollision();
         // Update position based on current velocity
         this.position = this.position.add(this.velocity.mul_scalar(dt));
         this.stayInPolygon(polygonCoordinates);
+        // correctly reset the velocity vectors magnitude (possibly reduced by _preventGroundCollision)
+        this.speed_ms = speed_ms_before;
+        this._computeVelocity_inPixelPerSec(); // use parameters to update vector
     }
     
     stayInPolygon(polygonCoordinates) {
@@ -464,9 +471,11 @@ class Fish {
     }
 
     _preventGroundCollision() {
+        // This function prevents the fish from colliding with the ground
+        // * it reduces the velocity to correctly compute the position after this function
+        // --> the velocity needs to be reset since the deceleration is only a tweak
         const p = this.position, v = this.velocity, speed_ms = this.speed_ms;
-        // const p = fish.position, v = fish.velocity, phi = fish.phi, theta = fish.theta, speed_ms = fish.speed_ms;
-        // check if the fish is below the ground
+        // check if the fish is below the ground)
         const p_next = p.add(v.mul_scalar(dt));
         // get the depth locations with conflicting depth
         const indices2D = depthIndicesWithConflicts(p, p_next, depth_map)
@@ -480,20 +489,40 @@ class Fish {
     
         // get the triangles associated to the indices (each triangle defined by three point indices)
         const triangles_as_indices = getTrianglesFromPointIndices(indices, triangles, depth_point_idx_to_triangle_starts);
-        // check if max indices of trangles_as_indices is lower or equal to length of depth_points
         // get the closest triangle intersection
-        var [t_min, norm_min] = closestCollisionWithTriangle(p, p_next, triangles_as_indices);
-        if (0 < t_min && t_min < 1.05){
-            // projection of the velocity on the normal of the triangle
-            const projection_v = norm_min.dot(v);
-            // it should always be negative, otherwise the fish would swim from under the ground to above
-            if (projection_v > 0) {
-                console.warn("Fish id:", this.id, "is colliding with the ground, but projection is positive --> returns to above the ground");
-                return;
+        const [t_min, norm_min, tria_min] = closestCollisionWithTriangle(p, p_next, triangles_as_indices);
+        if (t_min < 0 || 1 < t_min) {
+            return;
+        }
+        const projection_v = norm_min.dot(v);
+        if (t_min == 1) { // prevent border cases
+            if (projection_v > 0) { // if fish is leaving ground, accelerate a little
+                this.velocity = v.mul_scalar(1.05);
+                console.warn("Fish id:", this.id, "is colliding with the ground, but projection is positive --> accelerate (1.05) to above the ground");
+            } else {                // if fish is colliding with ground, decelerate a little
+                this.velocity = v.mul_scalar(0.95);
             }
-            // correct the velocity vector:
+        } else if (projection_v > 0) {
+            // projection of the velocity on the normal of the triangle
+            // it should always be negative, otherwise the fish would swim from under the ground to above
+            console.warn("Fish id:", this.id, "is colliding with the ground, but projection is positive --> returns to above the ground");
+            console.log("norm_min:", norm_min, "projection_v:", projection_v, "t_min:", t_min);
+            points_to_draw.push([p[0], p[1], p[2], 1]); // DEBUGGING
+            const pc = p.add(v.mul_scalar(dt * t_min));
+            points_to_draw.push([pc[0], pc[1], pc[2], -1]); // DEBUGGING
+            // push every point of the tria_min to points_to_draw
+            tria_min.forEach((tria_point) => {
+                points_to_draw.push([tria_point[0], tria_point[1], tria_point[2], -1]); // DEBUGGING
+            });
+            this.debug_sign = -1; // set debug_sign to -1 to indicate that something is wrong
+            return;
+        } else { // t_min \in [0, 1[: reflect the velocity vector + update the position
             console.log("Fish id:", this.id, "is colliding with the ground, correcting velocity vector");
-            this.velocity = this.velocity.add(norm_min.mul_scalar(-projection_v));
+            // correct the position:
+            this.position = p.add(v.mul_scalar(t_min * dt));
+            // correct the velocity vector:
+            this.velocity = this.velocity.add(norm_min.mul_scalar(2 * Math.abs(projection_v))); // reflect the velocity vector on the surface
+            this.velocity = this.velocity.mul_scalar(1-t_min); // reduce speed a little, 
             this.phi = this.velocity.phi();
             this.theta = this.velocity.theta();
             this.speed_ms = this.velocity.norm() / pixel_per_meter; // convert to speed in METER / sec
@@ -507,11 +536,12 @@ class Fish {
         this.velocity = this.velocity.mul_scalar(this.speed_ms * pixel_per_meter);
     }
     draw_and_save_position(max_iter) {
-        const timestamp_now = this.timestamp[this.timestamp.length-1] + 1; 
+        const timestamp_now = Math.abs(this.timestamp[this.timestamp.length-1]) + 1; // taking abs because timestamp < 0 is used for debugging
 
         // save the position
         this.positions.push(this.position);
-        this.timestamp.push(timestamp_now);
+        this.timestamp.push(timestamp_now * this.debug_sign); // if debug_sign = -1: something is wrong, --> negative timestamp
+        this.debug_sign = 1; // reset debug_sign, 1="all good"
         
         if (this.positions.length > max_iter) {
             this.positions.shift();
@@ -697,12 +727,14 @@ function animateFish() {
                 console.error("Invalid point in points_to_draw:", point);
                 continue;
             }
+            if (point[3] < 0) continue; // skip points with negative value in the last coordinate
             // Ensure the point has at least two coordinates
             ctx.beginPath();
             ctx.arc(point[0], point[1], 2, 0, Math.PI * 2);
             ctx.fill();
         }
         //points_to_draw = []; // clear the points to draw for the next frame
+        // stop the simulation
     }
     
 
@@ -716,6 +748,10 @@ function animateFish() {
         }
     }
     triangles_to_draw = []; // clear the triangles to draw for the next frame
+
+    // if (points_to_draw.length > 0) {
+    //     throw new Error("Simulation stopped: fish is colliding with the ground, but projection is positive.");
+    // }
 
     // draw each fish (at output time step dt_output = 1s)
     fishes.forEach(function (fish) {
@@ -834,7 +870,7 @@ function rescaleCoordinates2D(coordinates) {
     return rescaled_coords;
 }
 
-// Function to rescale x,y coordinates but keep z untouched
+// Function to rescale x,y,z coordinates
 function rescaleCoordinates3D(coordinates) {
     const minX = geojson_xlimits_ori[0];
     const maxX = geojson_xlimits_ori[1];
@@ -1169,23 +1205,30 @@ function surfaceRepulsionForce(fish, response_time, strength) {
 }
 
 function checkIfBelowGround(p, id) {
-    let xIndex = Math.round(p[0] / depthResolution);
-    let yIndex = Math.round(p[1] / depthResolution);
-    var depthIndex = NaN;
-    if (xIndex >= 0 && yIndex >= 0 && xIndex < depth_map_points_idxs[0].length && yIndex < depth_map_points_idxs.length) {
-        depthIndex = depth_map_points_idxs[yIndex][xIndex];
-    }
-    // if depthIndex is NaN, the point is outside the depth map
-    if (isNaN(depthIndex)) {
-        return [0.9, new Vector(0, 0, 1)]; // fish outside depth map, ... go back to surface
-    }
-    const triangles_as_indices = getTrianglesFromPointIndices([depthIndex], triangles, depth_point_idx_to_triangle_starts);
+    const indices2D = depthIndicesWithConflicts(p, p, depth_map)
+    const indices = [...new Set(
+        indices2D.map((index) => depth_map_points_idxs[index[0]][index[1]])
+    )];
+    const triangles_as_indices = getTrianglesFromPointIndices(indices, triangles, depth_point_idx_to_triangle_starts);
+    // OLD CODE:
+    // let xIndex = Math.round(p[0] / depthResolution);
+    // let yIndex = Math.round(p[1] / depthResolution);
+    // var depthIndex = NaN;
+    // if (xIndex >= 0 && yIndex >= 0 && xIndex < depth_map_points_idxs[0].length && yIndex < depth_map_points_idxs.length) {
+    //     depthIndex = depth_map_points_idxs[yIndex][xIndex];
+    // }
+    // // if depthIndex is NaN, the point is outside the depth map
+    // if (isNaN(depthIndex)) {
+    //     return [0.9, new Vector(0, 0, 1)]; // fish outside depth map, ... go back to surface
+    // }
+    // const triangles_as_indices = getTrianglesFromPointIndices([depthIndex], triangles, depth_point_idx_to_triangle_starts);
+    // END OLD CODE
     const p_surface = [p[0], p[1], 0]; // surface position at the same x,y coordinates]
-    const [t_min, norm_min] = closestCollisionWithTriangle(p, p_surface, triangles_as_indices);
-    if (t_min < 1) {
-        // console.log("fish", id, "below ground at position", p, "with t_min", t_min, "and normal", norm_min);
-        points_to_draw.push([p[0], p[1]]); // for debugging purposes
-    }
+    const [t_min, norm_min, tria_min] = closestCollisionWithTriangle(p, p_surface, triangles_as_indices);
+    // if (t_min < 1) {
+    //     // console.log("fish", id, "below ground at position", p, "with t_min", t_min, "and normal", norm_min);
+    //     points_to_draw.push([p[0], p[1]]); // for debugging purposes
+    // }
     return [t_min, norm_min];
 }
 
@@ -1194,17 +1237,19 @@ function closestCollisionWithTriangle(p, p_next, triangles_as_indices){
     // get the closest triangle intersection
     var t_min = 1.2; // if t>1 the lines do not intersect 
     var norm_min = null;
+    var triangle_min = null;
     for (let i = 0; i < triangles_as_indices.length; i++) {
         const triangle = getTriangleCoords(triangles_as_indices[i], depth_points);
         let [t, norm] = lineIntersectsTriangle(p, p_next, triangle);
         if (t < t_min) {
-            triangles_to_draw.push(triangle); // for debugging purposes
             t_min = t;
             norm_min = norm;
+            triangle_min = triangle;
         }
     }
     // only normalize if collision is found
-    if (t_min <= 1.1) {
+    if (t_min <= 1) {
+        triangles_to_draw.push(triangle_min); // for debugging purposes
         // normalize the normal vector
         norm_min = new Vector(norm_min[0], norm_min[1], norm_min[2]);
         norm_min = norm_min.div_scalar(norm_min.norm());
@@ -1213,7 +1258,7 @@ function closestCollisionWithTriangle(p, p_next, triangles_as_indices){
             norm_min = norm_min.mul_scalar(-1);
         }
     }
-    return [t_min, norm_min];
+    return [t_min, norm_min, triangle_min];
 }
 
 function groundRepulsionForce(fish, response_time, strength) {
@@ -1250,7 +1295,7 @@ function groundRepulsionForce(fish, response_time, strength) {
     const triangles_as_indices = getTrianglesFromPointIndices(indices, triangles, depth_point_idx_to_triangle_starts);
     // check if max indices of trangles_as_indices is lower or equal to length of depth_points
     // get the closest triangle intersection
-    var [t_min, norm_min] = closestCollisionWithTriangle(p, p_after_respTime, triangles_as_indices);
+    var [t_min, norm_min, tria_min] = closestCollisionWithTriangle(p, p_after_respTime, triangles_as_indices);
     // NOTE PPK: I assume that the fish is always insidee the lake.... if outside, no triangle intersection is found and code fails
     // if no triangle is found: there are two options:
     //  A) the fish is outside the lake
@@ -1526,8 +1571,29 @@ function applyPositioningError(tracks, errorProbHigh, errorSDHigh, errorSDLow) {
     return withError;
 }
 
+function downloadTriangles() {
+    // Create CSV content for triangles
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "triangle_id,point_1_x,point_1_y,point_1_z,point_2_x,point_2_y,point_2_z,point_3_x,point_3_y,point_3_z\n";
+    for (let i = 0; i < triangles.length; i+=3){
+        const triangle = triangles.slice(i, i + 3);
+        const point1 = depth_points[triangle[0]];
+        const point2 = depth_points[triangle[1]];
+        const point3 = depth_points[triangle[2]];
+        csvContent += `${i/3 + 1},${point1[0]},${point1[1]},${point1[2]},${point2[0]},${point2[1]},${point2[2]},${point3[0]},${point3[1]},${point3[2]}\n`;
+    };
+    // Create a link element and trigger download
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "triangles.csv");
+    document.body.appendChild(link);
+    link.click();
+}
+
 function downloadData() {
     downloadTracks();
+    downloadPoints();
     downloadStates();
 }
 
@@ -1572,13 +1638,20 @@ function downloadTracks() {
     const ssTrack = param.ssTrack;
     const detYield = param.detYield;
     const posErr = param.applyPosErr;
+    const outPixelCoordinates = param.outPixelCoordinates;
 
-    console.log(posErr);
+    console.log('position Error: ', posErr, 'tracks in pixel coord.:', outPixelCoordinates);
 
     const rescaledTracks = fishes.map(fish => {
         return fish.positions.map((position, index) => {
-            const originalCoord = rescaleToGeoJSON(position[0], position[1], position[2]);
-            return [originalCoord[0], originalCoord[1], originalCoord[2], fish.timestamp[index]];
+            if (outPixelCoordinates) {
+                // Output pixel coordinates directly
+                return [position[0], position[1], position[2], fish.timestamp[index]];
+            } else {
+                // Rescale to GeoJSON coordinates
+                const originalCoord = rescaleToGeoJSON(position[0], position[1], position[2]);
+                return [originalCoord[0], originalCoord[1], originalCoord[2], fish.timestamp[index]];
+            }
         });
     });
 
@@ -1610,6 +1683,45 @@ function downloadTracks() {
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", "fish_tracks.csv");
+    document.body.appendChild(link);
+    link.click();
+}
+
+function downloadPoints() {
+    // Check if there are any points to download
+    if (points_to_draw.length === 0) {
+        console.warn("No points to download. points_to_draw is empty.");
+        alert("No points to download. The debugging points array is empty.");
+        return;
+    }
+
+    const outPixelCoordinates = param.outPixelCoordinates;
+    console.log('Downloading points in pixel coordinates:', outPixelCoordinates);
+
+    // Create CSV content
+    let csvContent = "data:text/csv;charset=utf-8,";
+    csvContent += "X,Y,Z,debugFlag\n";
+    
+    points_to_draw.forEach(point => {
+        if (point.length >= 3) {
+            if (outPixelCoordinates) {
+                // Output pixel coordinates directly
+                csvContent += point[0] + "," + point[1] + "," + point[2] + "," + point[3] + " \n";
+            } else {
+                // Rescale to GeoJSON coordinates
+                const originalCoord = rescaleToGeoJSON(point[0], point[1], point[2]);
+                csvContent += originalCoord[0] + "," + originalCoord[1] + "," + originalCoord[2] + "," + point[3] + "\n";
+            }
+        } else {
+            console.warn("Invalid point in points_to_draw:", point);
+        }
+    });
+
+    // Create a link element and trigger download
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", "debug_points.csv");
     document.body.appendChild(link);
     link.click();
 }
@@ -1650,7 +1762,9 @@ const param = {
   detYield: 100,
   maxIter: 43200,  // = 12 hours * 60 minutes * 60 seconds
   applyPosErr: false,
+  outPixelCoordinates: false,
   download: function() {downloadData()},
+  downloadTriangles: function() {downloadTriangles()},
 };
 
 
@@ -1853,7 +1967,9 @@ gui.add(param, 'ssTrack').name('Subsample track (s)');
 gui.add(param, 'detYield').name('Detection yield (%)');
 gui.add(param, 'maxIter').name(`Max. track length (${dt_output} s)`);
 gui.add(param, 'applyPosErr').name('Apply position error (y/n)');
+gui.add(param, 'outPixelCoordinates').name('Tracks in pixel coordinates');
 gui.add(param, "download").name('Download tracks');
+gui.add(param, "downloadTriangles").name('Download basin (pixel coord.)');
 geoJSONFileInput.addEventListener('change', handleGeoJSONFile);
 
 /* console.log("Resting state parameters:", draw_state_parameters(0));

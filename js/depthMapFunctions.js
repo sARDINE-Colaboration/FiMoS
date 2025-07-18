@@ -487,14 +487,12 @@ function lineIntersectsTriangle(lineStart, lineEnd, triangle) {
     }
 
     const u = dotProduct(crossProduct(edge2, lineDir_n), ls_minus_v0) / lineDirN_dot_norm;
-    //if (u < 0 || u > 1) {
-    if (u < -0.1 || u > 1.1) { // condition is relaxed, actually it is for u>1, but we allow a small margin
+    if (u < 0 || u > 1) {
         return [1.5, normal]; // Intersection point is outside the segment
     }
     
     const v = dotProduct(crossProduct(lineDir_n, edge1), ls_minus_v0) / lineDirN_dot_norm;
-    // if (u + v < 0 || u + v > 1) {
-    if (u + v < -0.2 || u + v > 1.2) { // condition is relaxed, actually it is for u+v>1, but we allow a small margin
+    if (u + v < 0 || u + v > 1) {
         return [1.5, normal]; // Intersection point is outside the segment
     }
     return [t, normal];
