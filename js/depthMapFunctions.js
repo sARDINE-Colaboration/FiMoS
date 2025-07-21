@@ -1,4 +1,3 @@
-
 function calculateDistanceToPolygon(geojson) {
     // Extract coordinates of the polygon boundary
     const polygonCoordinates = geojson.features[0].geometry.coordinates; // Assuming it's the first feature and a Polygon
@@ -459,7 +458,7 @@ function dotProduct(v1, v2) {
     return v1[0] * v2[0] + v1[1] * v2[1] + v1[2] * v2[2];
 }
 
-function lineIntersectsTriangle(lineStart, lineEnd, triangle) {
+function lineIntersectsTriangle_ppk(lineStart, lineEnd, triangle) {
     // Extract triangle vertices
     const [v0, v1, v2] = triangle;
 

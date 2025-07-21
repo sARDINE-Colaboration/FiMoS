@@ -356,7 +356,7 @@ class Fish {
         this.patch_sensing_length = 10; // sensing range for food patches in METER
         this.shore_time = 10;
         this.shore_strength = 5;
-        this.depth_time = 3;
+        this.depth_time = 10;
         this.depth_stength = 10;
         this.shore_avoidance_sign = 0; // to avoid direction switching during shore-avoidance
         this.ground_avoidance_sign = 0; // to avoid direction switching during ground-avoidance
@@ -446,9 +446,12 @@ class Fish {
         // update velocity vector
         const speed_ms_before = this.speed_ms;
         this._computeVelocity_inPixelPerSec(); // use parameters to update vector
-        this._preventGroundCollision();
-        this._preventGroundCollision();
-        this._preventGroundCollision();
+        // avoid while loop --> no infinite loops
+        if (!this._preventGroundCollision()){
+            if (!this._preventGroundCollision()){
+                this._preventGroundCollision();
+            }
+        }
         // Update position based on current velocity
         this.position = this.position.add(this.velocity.mul_scalar(dt));
         this.stayInPolygon(polygonCoordinates);
@@ -472,15 +475,17 @@ class Fish {
 
     _preventGroundCollision() {
         // This function prevents the fish from colliding with the ground
-        // * it reduces the velocity to correctly compute the position after this function
+        // * if collision-type C: it reduces the velocity to correctly compute the position after this function
         // --> the velocity needs to be reset since the deceleration is only a tweak
         const p = this.position, v = this.velocity, speed_ms = this.speed_ms;
         // check if the fish is below the ground)
         const p_next = p.add(v.mul_scalar(dt));
         // get the depth locations with conflicting depth
         const indices2D = depthIndicesWithConflicts(p, p_next, depth_map)
+        // if no depth conflicts OR the speed is zero, do nothing
+        // PPK-note: speed_ms == 0 should be adapted to account for numerical precision issues (speed < Epsilon)
         if (indices2D.length == 0 || speed_ms == 0) {
-            return;
+            return true;
         }
         // get the indices of the depth points
         const indices = [...new Set(
@@ -492,40 +497,40 @@ class Fish {
         // get the closest triangle intersection
         const [t_min, norm_min, tria_min] = closestCollisionWithTriangle(p, p_next, triangles_as_indices);
         if (t_min < 0 || 1 < t_min) {
-            return;
+            return true;
         }
+        console.warn("Fish id:", this.id, "is colliding with ground");
         const projection_v = norm_min.dot(v);
         if (t_min == 1) { // prevent border cases
             if (projection_v > 0) { // if fish is leaving ground, accelerate a little
                 this.velocity = v.mul_scalar(1.05);
-                console.warn("Fish id:", this.id, "is colliding with the ground, but projection is positive --> accelerate (1.05) to above the ground");
+                console.warn("Collision-type A: t=1 AND triangle-norm-projection > 0 --> accelerate (1.05) to above the ground");
+                return true;
             } else {                // if fish is colliding with ground, decelerate a little
                 this.velocity = v.mul_scalar(0.95);
+                return true;
             }
         } else if (projection_v > 0) {
             // projection of the velocity on the normal of the triangle
             // it should always be negative, otherwise the fish would swim from under the ground to above
-            console.warn("Fish id:", this.id, "is colliding with the ground, but projection is positive --> returns to above the ground");
-            console.log("norm_min:", norm_min, "projection_v:", projection_v, "t_min:", t_min);
-            points_to_draw.push([p[0], p[1], p[2], 1]); // DEBUGGING
-            const pc = p.add(v.mul_scalar(dt * t_min));
-            points_to_draw.push([pc[0], pc[1], pc[2], -1]); // DEBUGGING
-            // push every point of the tria_min to points_to_draw
-            tria_min.forEach((tria_point) => {
-                points_to_draw.push([tria_point[0], tria_point[1], tria_point[2], -1]); // DEBUGGING
-            });
-            this.debug_sign = -1; // set debug_sign to -1 to indicate that something is wrong
-            return;
-        } else { // t_min \in [0, 1[: reflect the velocity vector + update the position
-            console.log("Fish id:", this.id, "is colliding with the ground, correcting velocity vector");
-            // correct the position:
-            this.position = p.add(v.mul_scalar(t_min * dt));
+            console.warn("Collision-type B: t<1 AND triangle-norm-projection > 0 --> next step will be above the ground");
+            const pc = p.add(v.mul_scalar(dt * t_min)); // collision position to monitor
+            monitor_bug(this, p, pc, tria_min, points_to_draw); // DEBUGGING
+            return false; // collision still possible --> check again
+        } else { // t_min \in [0, 1[: reflect the velocity vector + update the position to just before collision position 
+            console.warn("Collision-type C: t<1 AND triangle-norm-projection < 0 --> reflect at ground");
+            const pc = p.add(v.mul_scalar(dt * t_min)); // collision position to monitor
+            monitor_bug(this, p, pc, tria_min, points_to_draw); // DEBUGGING
+            // correct the position :
+            const almost = 0.9999; // to avoid artifacts due to fish beeing in ground surface
+            this.position = p.add(v.mul_scalar(almost * t_min * dt));
             // correct the velocity vector:
             this.velocity = this.velocity.add(norm_min.mul_scalar(2 * Math.abs(projection_v))); // reflect the velocity vector on the surface
-            this.velocity = this.velocity.mul_scalar(1-t_min); // reduce speed a little, 
+            this.velocity = this.velocity.mul_scalar(1-t_min * almost); // reduce speed a little, 
             this.phi = this.velocity.phi();
             this.theta = this.velocity.theta();
             this.speed_ms = this.velocity.norm() / pixel_per_meter; // convert to speed in METER / sec
+            return false; // collision still possible --> check again
         }
     }
 
@@ -603,6 +608,19 @@ class Fish {
             ctx.fill();
         }
     }
+}
+
+
+// monitors bug: p1=current position, p2=collision position,
+//      triangle=ground collision triangle, debug_points=collector of points to draw
+function monitor_bug(fish, p1, p2, triangle, debug_points){
+    debug_points.push([p1[0], p1[1], p1[2], 1]); // DEBUGGING
+    debug_points.push([p2[0], p2[1], p2[2], -1]); // DEBUGGING
+    // push every point of the tria_min to points_to_draw
+    triangle.forEach((tria_point) => {
+        debug_points.push([tria_point[0], tria_point[1], tria_point[2], -1]); // DEBUGGING
+    });
+    fish.debug_sign = -1; // debug_sign < 0 will trigger a negative-time indices at next draw
 }
 
 // this function computes the distance matrix between all fish in a sparse way
@@ -1232,6 +1250,72 @@ function checkIfBelowGround(p, id) {
     return [t_min, norm_min];
 }
 
+// Function to check if a ray intersects a triangle and returns the intersection parameters
+// This function uses the Möller–Trumbore intersection algorithm
+// Reference: https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_algorithm
+function lineIntersectsTriangle(rayOrigin, rayEnd, triangle) {
+    const EPSILON = 1e-7;
+    const origin = new Vector(...rayOrigin);
+    const end = new Vector(...rayEnd);
+    
+    // Calculate the ray vector from ray origin to ray end
+    var rayVector = end.sub(origin);
+    rayVector = rayVector.div_scalar(rayVector.norm());
+
+    // Extract triangle vertices
+    var [v0, v1, v2] = triangle;
+    v0 = new Vector(...v0);
+    v1 = new Vector(...v1);
+    v2 = new Vector(...v2);
+
+
+    // Compute edges of the triangle
+    const edge1 = v1.sub(v0);
+    const edge2 = v2.sub(v0);
+
+    // h = cross(rayVector, edge2)
+    const h = crossProduct(rayVector, edge2);
+
+    const a = dotProduct(edge1, h);
+    if (a > -EPSILON && a < EPSILON) {
+        // Ray is parallel to the triangle.
+        const normal = crossProduct(edge1, edge2);
+        return [1.5, normal];
+    }
+
+    const f = 1.0 / a;
+
+    // s = rayOrigin - v0
+    const s = origin.sub(v0);
+
+    const u = f * dotProduct(s, h);
+    if (u < 0.0 || u > 1.0) {
+        const normal = crossProduct(edge1, edge2);
+        return [1.5, normal];
+    }
+
+    // q = cross(s, edge1)
+    const q = crossProduct(s, edge1);
+
+    const v = f * dotProduct(rayVector, q);
+    if (v < 0.0 || u + v > 1.0) {
+        const normal = crossProduct(edge1, edge2);
+        return [1.5, normal];
+    }
+
+    // t = f * dot(edge2, q)
+    const t = f * dotProduct(edge2, q);
+    const normal = crossProduct(edge1, edge2);
+    
+    if (t > EPSILON) {
+        // Ray intersects triangle
+        return [t, normal];
+    }
+
+    // There is a line intersection but not a ray intersection.
+    return [1.5, normal];
+}
+
 function closestCollisionWithTriangle(p, p_next, triangles_as_indices){
     // check if max indices of trangles_as_indices is lower or equal to length of depth_points
     // get the closest triangle intersection
@@ -1240,7 +1324,7 @@ function closestCollisionWithTriangle(p, p_next, triangles_as_indices){
     var triangle_min = null;
     for (let i = 0; i < triangles_as_indices.length; i++) {
         const triangle = getTriangleCoords(triangles_as_indices[i], depth_points);
-        let [t, norm] = lineIntersectsTriangle(p, p_next, triangle);
+        let [t, norm] = lineIntersectsTriangle_ppk(p, p_next, triangle);
         if (t < t_min) {
             t_min = t;
             norm_min = norm;
