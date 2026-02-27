@@ -1,3 +1,6 @@
+import { SimulationCore } from "./core/sim.mjs";
+import { Fish, FoodPatch, randomNormal } from "./core/legacy_physics.mjs";
+
 // Include the source file (not sure if the best approach, but it works)
 const script_depth = document.createElement('script');
 script_depth.src = './js/depthMapFunctions.js';
@@ -152,6 +155,30 @@ var transition_matrix = calculateTransitionMatrix(transition_probs, sojourn_time
 //see gui menu at bottom of script for global stdev variable
 
 console.log("variables loaded");
+
+const env = {
+    get viewport() { return { width: canvas.width, height: canvas.height }; },
+    get pixel_per_meter() { return pixel_per_meter; },
+    get depth_map() { return depth_map; },
+    get depth_map_points_idxs() { return depth_map_points_idxs; },
+    get depth_points() { return depth_points; },
+    get triangles() { return triangles; },
+    get depth_point_idx_to_triangle_starts() { return depth_point_idx_to_triangle_starts; },
+    get triangles_to_draw() { return triangles_to_draw; },
+    get points_to_draw() { return points_to_draw; },
+    get fishes() { return fishes; },
+    get food_patches() { return food_patches; },
+    get dist_matrix() { return dist_matrix; },
+    set dist_matrix(value) { dist_matrix = value; },
+    get depthResolution() { return depthResolution; },
+    get geojson() { return geojson; },
+    get food_patch_update_time() { return food_patch_update_time; },
+    draw_state_parameter_array: () => draw_state_parameter_array(states_present),
+    draw_state_parameter_from_array: (arr, state) => draw_state_parameter_from_array(arr, state),
+    zero_vector: zero_vector,
+};
+
+const simCore = new SimulationCore({ dt, dt_output }, Math.random);
 
 class Vector extends Array {
     add(other) {
@@ -320,383 +347,44 @@ function draw_state_parameter_from_array(state_param_array, state){
 // ATTENTION:
 //      in PIXELS: [positions, velocity, position]
 //      in METERS: [forces, speed_ms are in METER]
-class Fish {
-    constructor(id, geojson) {
-        this.id = id;
-        this.timestamp = [];
-        this.timestamp_states = [];
-        this.positions = []; // array of positions at each out_step in PIXELS
-        this.states = []; //
-        this.parameters = [];
-        this.position = new Vector(0, 0, 0); // unit = PIXELS
-        this.velocity = new Vector(0, 0, 0); // unit = PIXELS / sec
-        this.speed_ms = 0.0;  // speed in METER / sec
-        this.phi = 0.0;
-        this.theta = Math.PI / 2;
-        // state-independent parameters (turn-frictions)
-        this.turn_phi = 2; // turn friction for the xy-plane angle
-        this.turn_theta = 5; // turn friction for the depth angle
-        // state-dependent parameters
-        this.state = 0;
-        // Initialize state-dependent parameters
-        this.parameter_array = draw_state_parameter_array(states_present);
-        const initial_parameters = draw_state_parameter_from_array(this.parameter_array, this.state);
-        // const initial_parameters = draw_state_parameters(this.state);
-        this.beta = initial_parameters[0]; // speed relaxation coefficient (the higher, the quicker the preferred speed is reached)
-        this.v0 = initial_parameters[1]; // the preferred speed
-        this.D_phi = initial_parameters[2]; // angular noise intensity (xy-plane)
-        this.D_theta = initial_parameters[3]; // angular noise intensity (depth-plane)
-        this.D_v = initial_parameters[4]; // velocity noise intensity
-        // social force parameters
-        this.strength_att = initial_parameters[6]; // strength of attraction force
-        this.strength_align = initial_parameters[7]; // strength of alignment force
-        this.social_nn = []; // array of ids of nearest (interacting) neighbours
-        // environmental force parameters
-        this.patch_strength = initial_parameters[5]; //update based on state
-        this.patch_sensing_length = 10; // sensing range for food patches in METER
-        this.shore_time = 10;
-        this.shore_strength = 5;
-        this.depth_time = 10;
-        this.depth_stength = 10;
-        this.shore_avoidance_sign = 0; // to avoid direction switching during shore-avoidance
-        this.ground_avoidance_sign = 0; // to avoid direction switching during ground-avoidance
-        if (geojson) {
-            this.createFish(id, geojson);
-        }
-        this.debug_sign = 1; // used for debugging if debug_sin = -1: something is wrong
-    }
 
-    createFish(id, geojson) {
-        if (geojson) {
-            const polygonCoordinates = geojson.features[0].geometry.coordinates;
-            let tempx, tempy;
-            do {
-                tempx = Math.random() * canvas.width;
-                tempy = Math.random() * canvas.height;
-            } while (!pointInsidePolygon([tempx, tempy], polygonCoordinates));
-            this.position[0] = tempx;
-            this.position[1] = tempy;
-            this.position[2] = 0;
-        };
-        this.phi = Math.random() * Math.PI * 2;
-        this.theta = Math.PI/2 + Math.random() * Math.PI / 8;
-        this.speed_ms = Math.max(0, randomNormal(this.v0, this.v0 / 4)); // speed in METER / sec
-        this._computeVelocity_inPixelPerSec()
-        this.positions.push(this.position);
-        this.timestamp.push(0);
-        this.timestamp_states.push(0);
-        this.states.push(this.state);
-        this.parameters.push([this.beta, this.v0, this.D_phi, this.D_theta, this.D_v, this.patch_strength,this.patch_sensing_length, this.strength_att, this.strength_align]);
-    }
 
-    updatePosition(polygonCoordinates, dt) {
-        // forces
-        // ATTENTION: forces are in units of [m/s^2]
-        //            --> if your force depends on [distance, speed]
-        //                ensure to convert them from pixel to m via pixel_per_meter
-        var force = new Vector(0, 0, 0);
-        const force_social = socialForce(this, this.strength_att, this.strength_align);
-        const force_patch_attraction = patchAttractionForce(this, this.patch_sensing_length, this.patch_strength);
-        const force_shore_repulsion = shoreRepulsionForce(this, polygonCoordinates, this.shore_time, this.shore_strength);
-        const force_surface_repulsion = surfaceRepulsionForce(this, this.depth_time, this.depth_stength);
-        const force_ground_repulsion = groundRepulsionForce(this, this.depth_time, this.depth_stength);
-        force = force.add(force_social
-            ).add(force_patch_attraction
-            ).add(force_shore_repulsion
-            ).add(force_surface_repulsion
-            ).add(force_ground_repulsion);
-        // raise error if force is NaN and print the force
-        if (isNaN(force[0])){
-            console.log("force_social:", force_social, "force_patch_attraction:", force_patch_attraction, "force_shore_repulsion:", force_shore_repulsion, "force_surface_repulsion:", force_surface_repulsion, "force_ground_repulsion:", force_ground_repulsion);
-            console.log("Fish id:", this.id, "position", this.position,"velocity:", this.velocity, "force:", force, "speed_ms:", this.speed_ms, "phi:", this.phi, "theta:", this.theta);
-            // stop the simulation
-            throw new Error("NaN force detected for fish id: " + this.id);
-        }
+function drawFoodPatch(patch) {
+    ctx.fillStyle = "white";
+    const patchSize = 5;
+    ctx.beginPath();
+    const x = patch.position[0], y = patch.position[1];
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, patchSize, 0, Math.PI * 2);
+    ctx.fill();
+}
 
-        // define unit vectors
-        var speed_ms = this.speed_ms, phi = this.phi, theta = this.theta;
-        const cos_phi = Math.cos(phi), sin_phi = Math.sin(phi);
-        const cos_theta = Math.cos(theta), sin_theta = Math.sin(theta);
-        const u_v = new Vector(cos_phi * sin_theta, sin_phi * sin_theta, cos_theta); 
-        const u_phi = new Vector(-sin_phi * sin_theta, cos_phi * sin_theta, 0); 
-        const u_theta = new Vector(cos_phi * cos_theta, sin_phi * cos_theta, -sin_theta); 
-        // modify the speed_ms
-        const force_v = force.dot(u_v);
-        speed_ms += (this.beta * (this.v0 - speed_ms) + force_v) * dt; //update speed_ms
-        speed_ms += Math.sqrt(this.D_v * dt) * randomNormal(0, 1); //add noise to speed_ms
-        speed_ms = Math.max(0, Math.min(speed_ms, 20 * this.v0)); //restrict speed_ms between min and max - max is 20*preferred speed_ms
-        // modify the xy-plane angle
-        const force_phi = force.dot(u_phi);
-        const rand_phi = Math.sqrt(this.D_phi * dt) * randomNormal(0, 1)
-        phi += (force_phi * dt + rand_phi) / (speed_ms + this.turn_phi);
-        // modify the depth angle
-        const force_theta = force.dot(u_theta);
-        const rand_theta = Math.sqrt(this.D_phi * dt) * randomNormal(0, 1)
-        theta += (force_theta * dt + rand_theta) / (speed_ms + this.turn_theta);
-        // if the fish makes a looping
-        if (theta < 0){
-            phi += Math.PI;
-            theta *= -1;
-        }
-        if (theta > Math.PI) {
-            phi += Math.PI;
-            theta = Math.PI - (theta - Math.PI);
-        }
-        this.phi = phi, this.theta = theta, this.speed_ms = speed_ms; //apply newly calculated parameters this fish
-        // update velocity vector
-        const speed_ms_before = this.speed_ms;
-        this._computeVelocity_inPixelPerSec(); // use parameters to update vector
-        // avoid while loop --> no infinite loops
-        if (!this._preventGroundCollision()){
-            if (!this._preventGroundCollision()){
-                this._preventGroundCollision();
-            }
-        }
-        // Update position based on current velocity
-        this.position = this.position.add(this.velocity.mul_scalar(dt));
-        this.stayInPolygon(polygonCoordinates);
-        // correctly reset the velocity vectors magnitude (possibly reduced by _preventGroundCollision)
-        this.speed_ms = speed_ms_before;
-        this._computeVelocity_inPixelPerSec(); // use parameters to update vector
-    }
-    
-    stayInPolygon(polygonCoordinates) {
-        // Check if fish is outside the polygon
-        if (!pointInsidePolygon([this.position[0], this.position[1]], polygonCoordinates)) {
-            // If outside, reflect back by changing angle
-            this.phi += Math.PI; // Reverse direction
-            this.velocity = this.velocity.mul_scalar(-1); // Reverse direction for this update
-            this.velocity[2] = -this.velocity[2]; // keep depth-direction
-            // undo the last position change
-            this.position = this.position.add(this.velocity.mul_scalar(3*dt));
-            // now the fish is inside the polygon and points in the opposite direction
-        }
-    }
+function drawFish(fish) {
+    let hue = fish.state / (states_present.length) * 240;
+    hue = hue % 360;
+    ctx.fillStyle = "hsl(" + hue + ", 100%, 50%)";
 
-    _preventGroundCollision() {
-        // This function prevents the fish from colliding with the ground
-        // * if collision-type C: it reduces the velocity to correctly compute the position after this function
-        // --> the velocity needs to be reset since the deceleration is only a tweak
-        const p = this.position, v = this.velocity, speed_ms = this.speed_ms;
-        // check if the fish is below the ground)
-        const p_next = p.add(v.mul_scalar(dt));
-        // get the depth locations with conflicting depth
-        const indices2D = depthIndicesWithConflicts(p, p_next, depth_map)
-        // if no depth conflicts OR the speed is zero, do nothing
-        // PPK-note: speed_ms == 0 should be adapted to account for numerical precision issues (speed < Epsilon)
-        if (indices2D.length == 0 || speed_ms == 0) {
-            return true;
-        }
-        // get the indices of the depth points
-        const indices = [...new Set(
-            indices2D.map((index) => depth_map_points_idxs[index[0]][index[1]])
-        )];
-    
-        // get the triangles associated to the indices (each triangle defined by three point indices)
-        const triangles_as_indices = getTrianglesFromPointIndices(indices, triangles, depth_point_idx_to_triangle_starts);
-        // get the closest triangle intersection
-        const [t_min, norm_min, tria_min] = closestCollisionWithTriangle(p, p_next, triangles_as_indices);
-        if (t_min < 0 || 1 < t_min) {
-            return true;
-        }
-        console.warn("Fish id:", this.id, "is colliding with ground");
-        const projection_v = norm_min.dot(v);
-        if (t_min == 1) { // prevent border cases
-            if (projection_v > 0) { // if fish is leaving ground, accelerate a little
-                this.velocity = v.mul_scalar(1.05);
-                console.warn("Collision-type A: t=1 AND triangle-norm-projection > 0 --> accelerate (1.05) to above the ground");
-                return true;
-            } else {                // if fish is colliding with ground, decelerate a little
-                this.velocity = v.mul_scalar(0.95);
-                return true;
-            }
-        } else if (projection_v > 0) {
-            // projection of the velocity on the normal of the triangle
-            // it should always be negative, otherwise the fish would swim from under the ground to above
-            console.warn("Collision-type B: t<1 AND triangle-norm-projection > 0 --> next step will be above the ground");
-            const pc = p.add(v.mul_scalar(dt * t_min)); // collision position to monitor
-            monitor_bug(this, p, pc, tria_min, points_to_draw); // DEBUGGING
-            return false; // collision still possible --> check again
-        } else { // t_min \in [0, 1[: reflect the velocity vector + update the position to just before collision position 
-            console.warn("Collision-type C: t<1 AND triangle-norm-projection < 0 --> reflect at ground");
-            const pc = p.add(v.mul_scalar(dt * t_min)); // collision position to monitor
-            monitor_bug(this, p, pc, tria_min, points_to_draw); // DEBUGGING
-            // correct the position :
-            const almost = 0.9999; // to avoid artifacts due to fish beeing in ground surface
-            this.position = p.add(v.mul_scalar(almost * t_min * dt));
-            // correct the velocity vector:
-            this.velocity = this.velocity.add(norm_min.mul_scalar(2 * Math.abs(projection_v))); // reflect the velocity vector on the surface
-            this.velocity = this.velocity.mul_scalar(1-t_min * almost); // reduce speed a little, 
-            this.phi = this.velocity.phi();
-            this.theta = this.velocity.theta();
-            this.speed_ms = this.velocity.norm() / pixel_per_meter; // convert to speed in METER / sec
-            return false; // collision still possible --> check again
-        }
-    }
+    const depthRatio = Math.abs(fish.position[2] / maxDepth);
+    const triangleSize = 15 - depthRatio * 10;
 
-    _computeVelocity_inPixelPerSec() {
-        this.velocity[0] = Math.cos(this.phi) * Math.sin(this.theta);
-        this.velocity[1] = Math.sin(this.phi) * Math.sin(this.theta);
-        this.velocity[2] = Math.cos(this.theta);
-        this.velocity = this.velocity.mul_scalar(this.speed_ms * pixel_per_meter);
-    }
-    draw_and_save_position(max_iter) {
-        const timestamp_now = Math.abs(this.timestamp[this.timestamp.length-1]) + 1; // taking abs because timestamp < 0 is used for debugging
+    ctx.beginPath();
+    const x = fish.position[0], y = fish.position[1];
+    ctx.moveTo(x, y);
+    const angleA = fish.phi + Math.PI * (15 / 18);
+    const angleB = fish.phi + Math.PI * (21 / 18);
+    const angleC = fish.phi + Math.PI;
+    ctx.lineTo(x + Math.cos(angleA) * triangleSize, y + Math.sin(angleA) * triangleSize);
+    ctx.lineTo(x + Math.cos(angleC) * triangleSize * 0.5, y + Math.sin(angleC) * triangleSize * 0.5);
+    ctx.lineTo(x + Math.cos(angleB) * triangleSize, y + Math.sin(angleB) * triangleSize);
+    ctx.fill();
 
-        // save the position
-        this.positions.push(this.position);
-        this.timestamp.push(timestamp_now * this.debug_sign); // if debug_sign = -1: something is wrong, --> negative timestamp
-        this.debug_sign = 1; // reset debug_sign, 1="all good"
-        
-        if (this.positions.length > max_iter) {
-            this.positions.shift();
-            this.timestamp.shift();
-        }
-
-        // save the state if state-switch happened
-        if (this.state != this.states[this.states.length-1]) {
-            this.states.push(this.state);
-            this.timestamp_states.push(timestamp_now);
-            this.parameters.push([this.beta, this.v0, this.D_phi, this.D_theta, this.D_v, this.patch_strength,this.patch_sensing_length, this.strength_att, this.strength_align]);
-
-            if ( (timestamp_now - this.timestamp_states[0]) > max_iter) {
-                this.states.shift();
-                this.timestamp_states.shift();
-                this.parameters.shift();
-            }
-        }
-
-        // Calculate hue value based on fish state
-        // let hue = (this.speed / 10) * 240; // Hue ranges from 0 to 240 (blue to red)
-        let hue = this.state / (states_present.length) * 240; // Hue ranges from 0 to 240 (blue to red)  //CTM - removed states_present.length - 1   to avoid the fish changing color when only one state is present
-        // Ensure hue stays within the range [0, 360]
-        hue = hue % 360;
-
-        // Set color based on fish state 
-        ctx.fillStyle = "hsl(" + hue + ", 100%, 50%)";
-        // ctx.fillStyle = "white";
-
-        // Calculate the depth ratio
-        const depthRatio = Math.abs(this.position[2] / maxDepth); // Adjust maxDepth according to your global variable
-        // if (depthRatio > 1){
-        //     console.log("depthRatio is larger than 1, check maxDepth: ", depthRatio, this.position[2], maxDepth);
-        // }
-
-        // Adjust the size of the triangle based on the depth
-        const triangleSize = 15 - depthRatio * 10; // Decrease triangle size as the depth increases
-
-        // Draw a triangle representing the fish
+    for (let i = 0; i < fish.social_nn.length; i++) {
+        const neighbour = fishes[fish.social_nn[i]];
         ctx.beginPath();
-        const x = this.position[0], y = this.position[1];
-        ctx.moveTo(x, y);
-        const angleA = this.phi + Math.PI * (15 / 18); // 120 degrees
-        const angleB = this.phi + Math.PI * (21  / 18); // 240 degrees
-        const angleC = this.phi + Math.PI; // 180 degrees
-        ctx.lineTo(x + Math.cos(angleA) * triangleSize, y + Math.sin(angleA) * triangleSize);
-        ctx.lineTo(x + Math.cos(angleC) * triangleSize*0.5, y + Math.sin(angleC) * triangleSize*0.5);
-        ctx.lineTo(x + Math.cos(angleB) * triangleSize, y + Math.sin(angleB) * triangleSize);
-        ctx.fill();
-        
-        // Draw lines to social neighbours
-        for (let i = 0; i < this.social_nn.length; i++) {
-            const neighbour = fishes[this.social_nn[i]];
-            ctx.beginPath();
-            ctx.moveTo(this.position[0], this.position[1]);
-            ctx.lineTo(neighbour.position[0], neighbour.position[1]);
-            ctx.strokeStyle = "rgba(0, 0, 0, 0.5)"; // Set the alpha value to 0.5
-            ctx.stroke();
-            ctx.fill();
-        }
-    }
-}
-
-
-// monitors bug: p1=current position, p2=collision position,
-//      triangle=ground collision triangle, debug_points=collector of points to draw
-function monitor_bug(fish, p1, p2, triangle, debug_points){
-    debug_points.push([p1[0], p1[1], p1[2], 1]); // DEBUGGING
-    debug_points.push([p2[0], p2[1], p2[2], -1]); // DEBUGGING
-    // push every point of the tria_min to points_to_draw
-    triangle.forEach((tria_point) => {
-        debug_points.push([tria_point[0], tria_point[1], tria_point[2], -1]); // DEBUGGING
-    });
-    fish.debug_sign = -1; // debug_sign < 0 will trigger a negative-time indices at next draw
-}
-
-// this function computes the distance matrix between all fish in a sparse way
-function compute_dist_matrix_sparse(fishes){
-    dist_matrix = [];
-    var row_first = [];
-    for (let i = 0; i < fishes.length; i++) {
-        const row = [];
-        for (let j = i+1; j < fishes.length; j++) {
-            const distance = fishes[i].position.sub(fishes[j].position).norm();
-            row.push(distance);
-        }
-        // fill up the matrix with the already computed distances, and zero for the diagonal
-        let row_first = [];
-        for (let k = 0; k < i; k++) {
-            row_first.push(dist_matrix[k][i]);
-        }
-        row_first = row_first.concat(0);
-        dist_matrix.push(row_first.concat(row));
-    };
-}
-
-class FoodPatch{
-    constructor(id, geojson) {
-        this.id = id;
-        this.position = new Vector(0, 0, 0);
-        if (geojson) {
-            this.createPatch(id, geojson);
-        }
-    }
-        
-    createPatch(id, geojson) {
-        if (geojson) {
-            const polygonCoordinates = geojson.features[0].geometry.coordinates;
-            let tempx, tempy;
-            do {
-                tempx = Math.random() * canvas.width;
-                tempy = Math.random() * canvas.height;
-            } while (!pointInsidePolygon([tempx, tempy], polygonCoordinates));
-            this.position[0] = tempx;
-            this.position[1] = tempy;
-            this.position[2] = 0;
-        };
-    }
-
-    updatePatch() {
-        if (geojson) {
-            const polygonCoordinates = geojson.features[0].geometry.coordinates;
-    
-            // Determine the chance of updating the position
-            const updateChance = 1 / food_patch_update_time; // Example: if updateTime = 100, the chance is 1%
-    
-            // Check if the patch should update based on the update chance
-            if (Math.random() < updateChance) {
-                let tempx, tempy;
-                do {
-                    tempx = Math.random() * canvas.width;
-                    tempy = Math.random() * canvas.height;
-                } while (!pointInsidePolygon([tempx, tempy], polygonCoordinates));
-    
-                // Update the patch position
-                this.position[0] = tempx;
-                this.position[1] = tempy;
-                this.position[2] = 0;
-            }
-        }
-    }
-
-    draw() {
-        ctx.fillStyle = "white";
-        const patchSize = 5 ;
-        // Draw a point representing the food patch 
-        ctx.beginPath();
-        const x = this.position[0], y = this.position[1];
-        ctx.moveTo(x, y);
-        ctx.arc(x, y, patchSize, 0, Math.PI * 2);
+        ctx.moveTo(fish.position[0], fish.position[1]);
+        ctx.lineTo(neighbour.position[0], neighbour.position[1]);
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.5)";
+        ctx.stroke();
         ctx.fill();
     }
 }
@@ -717,17 +405,13 @@ function animateFish() {
     //draw the food patches
     food_patches.forEach(function (food_patch) {
         food_patch.updatePatch();
-        food_patch.draw();
+        drawFoodPatch(food_patch);
     });
 
     // Update the fish position in dt-time-steps
-    for (let i = 0; i < sim_steps; i++) {
-        // compute distance matrix
-        compute_dist_matrix_sparse(fishes)
-        // update the position of each fish
-        fishes.forEach(function (fish) {
-            fish.updatePosition(geojson.features[0].geometry.coordinates, dt);
-        });
+    if (geojson) {
+        simCore.stepLegacy(env, geojson.features[0].geometry.coordinates);
+        time_passed = simCore.time;
     }
     
 
@@ -773,10 +457,10 @@ function animateFish() {
 
     // draw each fish (at output time step dt_output = 1s)
     fishes.forEach(function (fish) {
-        fish.draw_and_save_position(param.maxIter); // important 1. record the position and state according to its past movement 2. switch state
+        fish.recordState(param.maxIter);
+        drawFish(fish);
         state_switch(fish); // switch state before updating position
     });
-    time_passed += dt_output;
     time_passed_stamp();
     drawScaleBar();
 
@@ -970,9 +654,10 @@ function resetAndCreateFish(num, geojson) {
         // Clear existing fish
         fishes = [];
         time_passed = 0;
+        simCore.time = 0;
         // Create specified number of fish
         for (var i = 0; i < num; i++) {
-            fishes.push(new Fish(i, geojson));
+            fishes.push(new Fish(i, env, geojson));
         }
     }
 }
@@ -1194,421 +879,17 @@ function lineSegmentIntersection(p1, p2, p3, p4) {
     return false
 }
 
-function surfaceRepulsionForce(fish, response_time, strength) {
-    const p = fish.position, v = fish.velocity, phi = fish.phi, theta = fish.theta, speed_ms = fish.speed_ms;
-    const p_after_respTime = p.add(v.mul_scalar(response_time));
-    const jump = p_after_respTime[2]; // depth > 0: fish in the air
-    var force_theta = crossProduct([Math.cos(phi + Math.PI / 2),
-                                    Math.sin(phi + Math.PI / 2),
-                                    0], v); // if speed_ms == 0, force_theta = [0, 0, 0]
-    force_theta = new Vector(force_theta[0], force_theta[1], force_theta[2]);
-    if (speed_ms != 0) {
-        force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
-        if (force_theta[2] > 0) force_theta = force_theta.mul_scalar(-1); // ensure the force points downwards
-    }
-    if (jump < 0) {
-        force_theta[0] = 0, force_theta[1] = 0, force_theta[2] = 0; // no force if future fish is below the surface
-    }
-    else {
-        force_theta[2] -= 1; // force direction is the combination of force_theta and -e_z
-        force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
-        var strength_scaled = strength; // default strength
-        if (p[2] < 0) { // if the fish is currently below the surface
-            const depth = Math.abs(p[2]); // positive depth value
-            strength_scaled = strength * (1 - depth / (jump + depth ) );
-        }
-        force_theta = force_theta.mul_scalar(strength_scaled); // scale the force
-    }
-    return force_theta;
-}
-
-function checkIfBelowGround(p, id) {
-    const indices2D = depthIndicesWithConflicts(p, p, depth_map)
-    const indices = [...new Set(
-        indices2D.map((index) => depth_map_points_idxs[index[0]][index[1]])
-    )];
-    const triangles_as_indices = getTrianglesFromPointIndices(indices, triangles, depth_point_idx_to_triangle_starts);
-    // OLD CODE:
-    // let xIndex = Math.round(p[0] / depthResolution);
-    // let yIndex = Math.round(p[1] / depthResolution);
-    // var depthIndex = NaN;
-    // if (xIndex >= 0 && yIndex >= 0 && xIndex < depth_map_points_idxs[0].length && yIndex < depth_map_points_idxs.length) {
-    //     depthIndex = depth_map_points_idxs[yIndex][xIndex];
-    // }
-    // // if depthIndex is NaN, the point is outside the depth map
-    // if (isNaN(depthIndex)) {
-    //     return [0.9, new Vector(0, 0, 1)]; // fish outside depth map, ... go back to surface
-    // }
-    // const triangles_as_indices = getTrianglesFromPointIndices([depthIndex], triangles, depth_point_idx_to_triangle_starts);
-    // END OLD CODE
-    const p_surface = [p[0], p[1], 0]; // surface position at the same x,y coordinates]
-    const [t_min, norm_min, tria_min] = closestCollisionWithTriangle(p, p_surface, triangles_as_indices);
-    // if (t_min < 1) {
-    //     // console.log("fish", id, "below ground at position", p, "with t_min", t_min, "and normal", norm_min);
-    //     points_to_draw.push([p[0], p[1]]); // for debugging purposes
-    // }
-    return [t_min, norm_min];
-}
-
-// Function to check if a ray intersects a triangle and returns the intersection parameters
-// This function uses the Möller–Trumbore intersection algorithm
-// Reference: https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_algorithm
-function lineIntersectsTriangle(rayOrigin, rayEnd, triangle) {
-    const EPSILON = 1e-7;
-    const origin = new Vector(...rayOrigin);
-    const end = new Vector(...rayEnd);
-    
-    // Calculate the ray vector from ray origin to ray end
-    var rayVector = end.sub(origin);
-    rayVector = rayVector.div_scalar(rayVector.norm());
-
-    // Extract triangle vertices
-    var [v0, v1, v2] = triangle;
-    v0 = new Vector(...v0);
-    v1 = new Vector(...v1);
-    v2 = new Vector(...v2);
-
-
-    // Compute edges of the triangle
-    const edge1 = v1.sub(v0);
-    const edge2 = v2.sub(v0);
-
-    // h = cross(rayVector, edge2)
-    const h = crossProduct(rayVector, edge2);
-
-    const a = dotProduct(edge1, h);
-    if (a > -EPSILON && a < EPSILON) {
-        // Ray is parallel to the triangle.
-        const normal = crossProduct(edge1, edge2);
-        return [1.5, normal];
-    }
-
-    const f = 1.0 / a;
-
-    // s = rayOrigin - v0
-    const s = origin.sub(v0);
-
-    const u = f * dotProduct(s, h);
-    if (u < 0.0 || u > 1.0) {
-        const normal = crossProduct(edge1, edge2);
-        return [1.5, normal];
-    }
-
-    // q = cross(s, edge1)
-    const q = crossProduct(s, edge1);
-
-    const v = f * dotProduct(rayVector, q);
-    if (v < 0.0 || u + v > 1.0) {
-        const normal = crossProduct(edge1, edge2);
-        return [1.5, normal];
-    }
-
-    // t = f * dot(edge2, q)
-    const t = f * dotProduct(edge2, q);
-    const normal = crossProduct(edge1, edge2);
-    
-    if (t > EPSILON) {
-        // Ray intersects triangle
-        return [t, normal];
-    }
-
-    // There is a line intersection but not a ray intersection.
-    return [1.5, normal];
-}
-
-function closestCollisionWithTriangle(p, p_next, triangles_as_indices){
-    // check if max indices of trangles_as_indices is lower or equal to length of depth_points
-    // get the closest triangle intersection
-    var t_min = 1.2; // if t>1 the lines do not intersect 
-    var norm_min = null;
-    var triangle_min = null;
-    for (let i = 0; i < triangles_as_indices.length; i++) {
-        const triangle = getTriangleCoords(triangles_as_indices[i], depth_points);
-        let [t, norm] = lineIntersectsTriangle_ppk(p, p_next, triangle);
-        if (t < t_min) {
-            t_min = t;
-            norm_min = norm;
-            triangle_min = triangle;
-        }
-    }
-    // only normalize if collision is found
-    if (t_min <= 1) {
-        triangles_to_draw.push(triangle_min); // for debugging purposes
-        // normalize the normal vector
-        norm_min = new Vector(norm_min[0], norm_min[1], norm_min[2]);
-        norm_min = norm_min.div_scalar(norm_min.norm());
-        // ensure the right direction (always points upwards... no wall possible)
-        if (norm_min[2] < 0) {
-            norm_min = norm_min.mul_scalar(-1);
-        }
-    }
-    return [t_min, norm_min, triangle_min];
-}
-
-function groundRepulsionForce(fish, response_time, strength) {
-    const p = fish.position, v = fish.velocity, phi = fish.phi, theta = fish.theta, speed_ms = fish.speed_ms;
-    // force_theta is orthogonal to the force_phi and velocity 
-    var force_theta = crossProduct([Math.cos(phi + Math.PI / 2),
-                                    Math.sin(phi + Math.PI / 2),
-                                    0], v); 
-    force_theta = new Vector(force_theta[0], force_theta[1], force_theta[2]);
-    if (speed_ms != 0) {
-        force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
-        if (force_theta[2] < 0) force_theta = force_theta.mul_scalar(-1); // ensure the force points upwards
-    }
-    // if the fish is below the ground, apply full force upwards
-    const [t_below_ground, norm_below_ground] = checkIfBelowGround(p, fish.id);
-    if (-0.01 < t_below_ground && t_below_ground < 1.01) {
-        force_theta = force_theta.add(norm_below_ground);
-        force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
-        return force_theta.mul_scalar(strength);
-    }
-    const p_after_respTime = p.add(v.mul_scalar(response_time));
-    // get the depth locations with conflicting depth
-    const indices2D = depthIndicesWithConflicts(p, p_after_respTime, depth_map)
-    var force = new Vector(0, 0, 0);
-    if (indices2D.length == 0 || fish.speed_ms == 0) {
-        return force; // no conflicting points, no force
-    }
-    // get the indices of the depth points
-    const indices = [...new Set(
-        indices2D.map((index) => depth_map_points_idxs[index[0]][index[1]])
-    )];
-    
-    // get the triangles associated to the indices (each triangle defined by three point indices)
-    const triangles_as_indices = getTrianglesFromPointIndices(indices, triangles, depth_point_idx_to_triangle_starts);
-    // check if max indices of trangles_as_indices is lower or equal to length of depth_points
-    // get the closest triangle intersection
-    var [t_min, norm_min, tria_min] = closestCollisionWithTriangle(p, p_after_respTime, triangles_as_indices);
-    // NOTE PPK: I assume that the fish is always insidee the lake.... if outside, no triangle intersection is found and code fails
-    // if no triangle is found: there are two options:
-    //  A) the fish is outside the lake
-    //  B) the fish is inside the lake but no triangle is colliding (depthIndicesWithConflicts gives "maybe conflicts")
-    // in the following we assume that (A) never happens
-    if (t_min > 1) {
-        fish.ground_avoidance_sign = 0; // no ground avoidance
-        return force;
-    }
-    // phi_ground is the phi angle of the normal vector
-    const phi_ground = norm_min.phi();
-    var phi_force = 0;
-    if (fish.ground_avoidance_sign != 0 || fish.shore_avoidance_sign != 0){
-        if (fish.ground_avoidance_sign == 0) {
-            fish.ground_avoidance_sign = fish.shore_avoidance_sign; // if shore avoidance is active, use the same sign
-        }
-        // point perpendicular to fish-swimming direction + away from shore
-        phi_force = phi + fish.ground_avoidance_sign * Math.PI/2; 
-    }
-    else{
-        phi_force = phi + Math.PI/2; 
-        fish.ground_avoidance_sign = 1;
-        // if phi_force points not away from ground (=in same direction as phi_ground), flip the direction 
-        if (Math.cos(phi_force) * Math.cos(phi_ground) + Math.sin(phi_force) * Math.sin(phi_ground) < 0){
-            phi_force += Math.PI;
-            fish.ground_avoidance_sign = -1;
-        }
-    }
-    // PPK-note: the code below had the idea to split the force into two components: phi and theta
-    //      - to estimate on how to split the force into phi and theta, the code computed the orthogonal vectors spanning the triangle
-    //          - the orhto_xy vector is in the xy-plane and orthogonal to the normal vector
-    //          - the ortho_z vector is orthogonal to both the ortho_xy and the normal vector
-    //      - the phi_strength is the projection of the velocity onto the ortho_xy vector
-    //      - the theta_strength is the projection of the velocity onto the ortho_z vector
-
-    // // force direction:
-    // const force_phi = new Vector(Math.cos(phi_force), Math.sin(phi_force), 0);
-    // // the force is split in two components: phi and theta
-    // // the relative strength is such that the fish changes its intended direction only minimal to avoid the ground
-    // // --> if a tiny force_phi is needed in order to be parallel to the triangle --> most force goes into phi
-    // // in order to check this we compute the two orthogonal vector that span the triangle:
-    // //   ortho_xy: is in the xy-plane --> ortho_xy = crossProduct(norm_min, e_z)
-    // //   ortho_z: is orthogonal to ortho_xy and normal vector --> ortho_z = crossProduct(ortho_xy, norm_min)
-    // var ortho_xy = crossProduct(norm_min, [0, 0, 1]);
-    // ortho_xy = new Vector(ortho_xy[0], ortho_xy[1], ortho_xy[2]);
-    // ortho_xy = ortho_xy.div_scalar(ortho_xy.norm()); // normalize the vector
-    // const ortho_z = crossProduct(norm_min, ortho_xy);
-    // const phi_strength = Math.abs(v.dot(ortho_xy));
-    // const theta_strength = Math.abs(v.dot(ortho_z));
-    // force = force_phi.mul_scalar( strength * (phi_strength / (phi_strength + theta_strength)) * (1 - t_min) );
-    // force = force.add(
-    //       force_theta.mul_scalar( strength * (theta_strength / (phi_strength + theta_strength)) * (1 - t_min) )
-    // );
-    // reduces speed and points changes direction to upwards
-    force_theta = force_theta.add(norm_min);
-    force_theta = force_theta.div_scalar(force_theta.norm()); // normalize the vector
-    force = force_theta.mul_scalar( strength * (1 - t_min) );
-    return force;
-}
-
-function shoreRepulsionForce(fish, polygon, response_time, strength) {
-    const p = fish.position, v = fish.velocity, phi = fish.phi, theta = fish.theta;
-    const p_after_respTime = p.add(v.mul_scalar(response_time));
-    var force = new Vector(0, 0, 0);
-    var intersection_distance_in_t = 1.1; // if t>1 the lines do not intersect
-    var index_line_segment = null;
-    // get the closest intersection
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        let intersection = lineSegmentIntersection(p, p_after_respTime, polygon[i], polygon[j]); 
-        if (intersection != false) {
-            if (intersection[0] < intersection_distance_in_t){
-                intersection_distance_in_t = intersection[0];
-                index_line_segment = j;
-            }
-        }
-    }
-    // if there was an intersection --> compute the vector pointing away from the shore-line-segment
-    if (index_line_segment !== null){
-        const j = index_line_segment;
-        const p1 = polygon[j], p2 = polygon[j+1];
-        const vel_seg = new Vector(p1[0] - p2[0], p1[1]- p2[1]);
-        var phi_force = vel_seg.phi() + Math.PI/2; // meant to point away from the shore + towards the fish
-        // if norm points not towards the fish, flip the direction
-        if (Math.cos(phi_force) * Math.cos(phi) + Math.sin(phi_force) * Math.sin(phi) > 0){ // = normalized(v_fish) dot normalized(v_force)
-            phi_force += Math.PI;
-        }
-        if (fish.shore_avoidance_sign != 0 || fish.ground_avoidance_sign != 0){
-            if (fish.shore_avoidance_sign == 0) {
-                fish.shore_avoidance_sign = fish.ground_avoidance_sign; // if ground avoidance is active, use the same sign
-            }
-            // point perpendicular to fish-swimming direction + away from shore
-            var phi_force2 = fish.phi + fish.shore_avoidance_sign * Math.PI/2; 
-        }
-        else{
-            var phi_force2 = fish.phi + Math.PI/2; 
-            fish.shore_avoidance_sign = 1;
-            // if phi_force2 points not away from shore (=in same direction as phi_force), flip the direction 
-            if (Math.cos(phi_force) * Math.cos(phi_force2) + Math.sin(phi_force) * Math.sin(phi_force2) < 0){
-                phi_force2 += Math.PI;
-                fish.shore_avoidance_sign = -1;
-            }
-        }
-        // force direction:
-        force[0] = Math.cos(phi_force2); 
-        force[1] = Math.sin(phi_force2); 
-        force = force.mul_scalar( strength * (1 - intersection_distance_in_t) );
-    }
-    else {
-        fish.shore_avoidance_sign = 0;
-    }
-    return force;
-}
-
-function patchAttractionForce(fish, patch_sensing_length, strength) {
-    const p = fish.position;
-    let force = new Vector(0, 0, 0);
-    let dist_threshold = patch_sensing_length * pixel_per_meter; // if t > 1, the lines do not intersect
-    let index_patch = null;
-
-    // Get the closest patch
-    food_patches.forEach((patch, index) => {
-        let patch_dist = p.sub(patch.position).norm(); 
-        if (patch_dist < dist_threshold) {
-            dist_threshold = patch_dist;
-            index_patch = index;
-        }
-    });
-
-    // If there is a closest patch, compute the vector pointing toward it
-    if (index_patch !== null) {
-        const closest_patch = food_patches[index_patch];
-        var direction_to_patch = closest_patch.position.sub(p);
-        const magnitude = direction_to_patch.norm()
-        if (magnitude > 0) {
-            direction_to_patch = direction_to_patch.div_scalar(magnitude);
-        }
-
-        // Scale the force based on strength and proximity
-        force = direction_to_patch.mul_scalar(strength); // Adjust the scaling factor as needed
-    }
-    return force;
-}
-
-function socialForce(fish, strength_att, strength_align) {
-    // the sensory range depends on the current speed (slow fish have a smaller range)
-    const p = fish.position, v_meter = fish.velocity.div_scalar(pixel_per_meter);
-    const t_min = 2;
-    const t_max = 10;
-    const d_min = t_min * fish.speed_ms * pixel_per_meter;
-    const d_max = t_max * fish.speed_ms * pixel_per_meter;
-    const dist_to_others = dist_matrix[fish.id];
-    var force_rep = new Vector(0, 0, 0);
-    var force_att = new Vector(0, 0, 0);
-    var force_ali = new Vector(0, 0, 0);
-    var counter_rep = 0;
-    fish.social_nn = [];
-    for (let i = 0; i < dist_to_others.length; i++) {
-        let d = dist_to_others[i];
-        if ( d < d_max && i != fish.id) {
-            let dist_weight = 1 - (d - d_min) / (d_max - d_min)
-            fish.social_nn.push(i);
-            // ATTRACTION or REPULSION FORCE
-            let direction_to_other = fishes[i].position.sub(p);
-            if (d > 0) {
-                direction_to_other = direction_to_other.div_scalar(d);
-            }
-            direction_to_other = force_rep.add(direction_to_other.mul_scalar(strength_att * dist_weight));
-            if (d < d_min) { // REPULSION FORCE
-                counter_rep += 1;
-                force_rep = force_rep.add(direction_to_other.mul_scalar(- 1));
-            }
-            else {
-                // ATTRACTION FORCE
-                force_att = force_att.add(direction_to_other);
-                // ALIGNMENT FORCE
-                v_meter_other = fishes[i].velocity.div_scalar(pixel_per_meter);
-                v_diff = v_meter_other.sub(v_meter);
-                force_ali = force_ali.add(v_diff.mul_scalar(strength_align * dist_weight));
-            }
-        }
-    }
-    if (counter_rep > 0) {
-        return force_rep.div_scalar(counter_rep);
-    }
-    else {  // ATTRACTION + ALIGNMENT FORCE
-        return force_att.add(force_ali);
-    }
-}
-
-// Function to calculate distance between two points
-function calculateDistance(x1, y1, x2, y2) {
-    return Math.sqrt(Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2));
-}
-
-function randomNormal(mean, sd) {
-    const u = 1 - Math.random(); //Converting [0,1) to (0,1]
-    const v = Math.random();
-    const num = Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
-    return num * sd + mean;
-}
-
 function makeFoodPatches(){
          if (geojson) {
              // Clear existing patches 
              food_patches = [];
              // Create specified number of patches 
              for (var i = 0; i < (n_food_patches-1); i++) {
-                 food_patches.push(new FoodPatch(i + 1, geojson));
+                 food_patches.push(new FoodPatch(i + 1, env, geojson));
              }
          } else {
              console.log("no geojson file");
          }
-}
-
-// Function to check if a point lies inside a polygon using ray casting algorithm
-// note: this function could be generalized to return the distance to the shore
-//       (in the second step the x-distance is already computed)
-function pointInsidePolygon(point, polygon) {
-    const x = point[0];
-    const y = point[1];
-    let inside = false;
-    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-        const xi = polygon[i][0], yi = polygon[i][1];
-        const xj = polygon[j][0], yj = polygon[j][1];
-        const intersect = ((yi > y) !== (yj > y)) &&
-            (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
-        if (intersect) inside = !inside;
-    }
-    return inside;
 }
 
 // Function to subsample fish tracks
