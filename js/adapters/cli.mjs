@@ -1,12 +1,29 @@
 import fs from "fs";
 import path from "path";
 import { SimulationCore } from "../core/sim.mjs";
+import { Fish, FoodPatch } from "../core/legacy_physics.mjs";
 import {
   calculateDistanceToPolygon,
   getMatrixIndicesAndPoints,
   sampleDepthMap,
   mapDepth,
+  triangulateGround,
+  mapDepthPointIdxToTriangleStarts,
 } from "../core/depth.mjs";
+import {
+  calculateBbox,
+  normalizeToLineString,
+  rescaleCoordinates2D,
+  rescaleCoordinates3D,
+} from "../core/geo.mjs";
+import {
+  calculateTransitionMatrix,
+  drawStateParameterArray,
+  drawStateParameterFromArray,
+  stateSwitch,
+} from "../core/state.mjs";
+import { createDefaultStateConfig } from "../core/defaults.mjs";
+import { Delaunay } from "d3-delaunay";
 
 function parseArgs(argv) {
   const args = new Map();
@@ -37,7 +54,6 @@ function usage() {
     "  --fish <n>         Number of fish (default: 0)",
     "  --width <n>        Viewport width (default: 1200)",
     "  --height <n>       Viewport height (default: 800)",
-    "  --build-depth      Build depth map in core (optional)",
     "  --depth-res <n>    Depth resolution (default: 4)",
     "  --max-depth <n>    Max depth for shore-distance mode (default: -8)",
     "  --out <path>       Output CSV file (default: stdout)",
@@ -63,57 +79,139 @@ const fishCount = Number(args.get("fish") ?? 0);
 const width = Number(args.get("width") ?? 1200);
 const height = Number(args.get("height") ?? 800);
 const outPath = args.get("out");
-const buildDepth = Boolean(args.get("build-depth"));
 const depthResolution = Number(args.get("depth-res") ?? 4);
 const maxDepthArg = Number(args.get("max-depth") ?? -8);
 
 const resolvedPath = path.resolve(process.cwd(), geojsonPath);
 const geojson = JSON.parse(fs.readFileSync(resolvedPath, "utf-8"));
 
-const sim = new SimulationCore();
+const sim = new SimulationCore({ dt: 0.05, dt_output: 1 });
 sim.loadGeoJSON(geojson, { width, height });
-if (fishCount > 0) sim.resetFish(fishCount);
 
-if (buildDepth) {
-  let depth_map = [];
-  let depth_map_points_idxs = [];
-  let depth_points = [];
-  let maxDepth = maxDepthArg;
+if (geojson.features.length > 0) {
+  normalizeToLineString(geojson.features[0]);
+}
 
-  if (geojson.features.length > 1 && geojson.features[1].geometry.type === "MultiPoint") {
-    depth_map = sampleDepthMap(geojson, {
-      worldWidth: width,
-      worldHeight: height,
-      depthResolution,
-    });
-    [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map, depthResolution);
-    const flatDepths = depth_map.flat().filter(d => !Number.isNaN(d));
-    maxDepth = Math.min(...flatDepths);
-  } else {
-    const depthMatrix = calculateDistanceToPolygon(geojson, {
-      worldWidth: width,
-      worldHeight: height,
-      depthResolution,
-    });
-    depth_map = mapDepth(depthMatrix, maxDepth);
-    [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map, depthResolution);
-  }
+const bbox = calculateBbox(geojson);
+const geojsonLimits = {
+  minX: bbox[0],
+  minY: bbox[1],
+  maxX: bbox[2],
+  maxY: bbox[3],
+};
 
-  sim.depth = {
-    depth_map,
-    depth_map_points_idxs,
-    depth_points,
-    maxDepth,
-  };
+const rescaled2D = rescaleCoordinates2D(
+  geojson.features[0].geometry.coordinates,
+  { width, height },
+  geojsonLimits
+);
+geojson.features[0].geometry.coordinates = rescaled2D.coords;
+
+const rescaleState = {
+  pixel_per_meter: rescaled2D.pixel_per_meter,
+  x_as_max_extent: rescaled2D.x_as_max_extent,
+  rescale_offset: rescaled2D.rescale_offset,
+};
+
+let maxDepth = maxDepthArg;
+let depth_map = [];
+let depth_map_points_idxs = [];
+let depth_points = [];
+
+if (geojson.features.length > 1 && geojson.features[1].geometry.type === "MultiPoint") {
+  geojson.features[1].geometry.coordinates = rescaleCoordinates3D(
+    geojson.features[1].geometry.coordinates,
+    { width, height },
+    rescaleState,
+    geojsonLimits
+  );
+  depth_map = sampleDepthMap(geojson, {
+    worldWidth: width,
+    worldHeight: height,
+    depthResolution,
+  });
+  [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map, depthResolution);
+  const flatDepths = depth_map.flat().filter(d => !Number.isNaN(d));
+  maxDepth = Math.min(...flatDepths);
+} else {
+  const depthMatrix = calculateDistanceToPolygon(geojson, {
+    worldWidth: width,
+    worldHeight: height,
+    depthResolution,
+  });
+  depth_map = mapDepth(depthMatrix, maxDepth);
+  [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map, depthResolution);
+}
+
+const shorelineCoords = geojson.features[0].geometry.coordinates;
+const [triangulated_points, triangles] = triangulateGround(
+  depth_points,
+  shorelineCoords,
+  depthResolution,
+  Delaunay
+);
+const depth_point_idx_to_triangle_starts = mapDepthPointIdxToTriangleStarts(depth_points.length, triangles);
+
+const stateDefaults = createDefaultStateConfig();
+let state_means_matrix = stateDefaults.state_means_matrix;
+let states_present = stateDefaults.states_present;
+let substates = stateDefaults.substates;
+let transition_probs = stateDefaults.transition_probs;
+let sojourn_times = stateDefaults.sojourn_times;
+let transition_matrix = calculateTransitionMatrix(transition_probs, sojourn_times, sim.config.dt_output);
+
+const param = { globalStateStdev: 0.05 };
+
+const fishes = [];
+const food_patches = [];
+
+const env = {
+  viewport: { width, height },
+  pixel_per_meter: rescaleState.pixel_per_meter,
+  depth_map,
+  depth_map_points_idxs,
+  depth_points: triangulated_points,
+  triangles,
+  depth_point_idx_to_triangle_starts,
+  triangles_to_draw: [],
+  points_to_draw: [],
+  fishes,
+  food_patches,
+  dist_matrix: [],
+  depthResolution,
+  geojson,
+  food_patch_update_time: 1000,
+  state_means_matrix,
+  lower_limits: [0.1, 0.01, 0.01, 0.01, 0.01, 0, 0, 0],
+  upper_limits: [3, 3, 1, 1, 1, 10, 5, 5],
+  substates,
+  param,
+  states_present,
+  transition_matrix,
+  draw_state_parameter_array: () => drawStateParameterArray(states_present, env),
+  draw_state_parameter_from_array: (arr, state) => drawStateParameterFromArray(arr, state, env),
+  zero_vector: stateDefaults.zero_vector,
+};
+
+for (let i = 0; i < 5; i++) {
+  food_patches.push(new FoodPatch(i + 1, env, geojson));
+}
+
+for (let i = 0; i < fishCount; i++) {
+  fishes.push(new Fish(i, env, geojson));
 }
 
 const rows = [];
 rows.push(["time", "fish_id", "x", "y", "z", "fish_state"].join(","));
 for (let i = 0; i < steps; i++) {
-  const snapshot = sim.step();
-  snapshot.fish.forEach(fish => {
+  env.food_patches.forEach(patch => patch.updatePatch());
+  const snapshot = sim.stepLegacy(env, geojson.features[0].geometry.coordinates);
+  env.fishes.forEach(fish => {
     const [x, y, z] = fish.position;
     rows.push([snapshot.time, fish.id, x, y, z, fish.state].join(","));
+  });
+  env.fishes.forEach(fish => {
+    stateSwitch(fish, env);
   });
 }
 const serialized = rows.join("\n");

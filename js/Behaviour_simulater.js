@@ -18,6 +18,15 @@ import {
     updateStateParameters,
     stateSwitch,
 } from "./core/state.mjs";
+import {
+    calculateBbox,
+    calculateMinMax2D,
+    normalizeToLineString,
+    rescaleCoordinates2D,
+    rescaleCoordinates3D,
+    rescaleToGeoJSON,
+} from "./core/geo.mjs";
+import { createDefaultStateConfig } from "./core/defaults.mjs";
 
 // Get the canvas element
 var canvas = document.getElementById("trailCanvas");
@@ -92,40 +101,21 @@ var renderedDepth;
 // shared variables among all fish agents
 var dist_matrix = [];
 
-// TODO: transform these into a matrix
-//       - # of rows: number of states
-//parameter means between 0 and 1
-// Define the parameter names
-const parameterNames = ['beta', 'v0', 'D_phi', 'D_theta', 'D_v', 'patch_strength', 'strength_att', 'strength_align'];
-//each vector of eight values corresponds to five parameters in this order: 
-// beta, v0, D_phi, D_theta, D_v, patch_strength, strength_att, strength_align
-const zero_vector =  [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-const resting_vector =  [0.8, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]; // 0.0, 0.2, 0.2];
-const foraging_vector = [0.1, 0.4,  0.9, 0.9, 0.8, 0.0, 0.0, 0.0]; // 0.9, 0.2, 0.2];
-const active_vector =   [0.8, 0.8,  0.1, 0.1, 0.2, 0.0, 0.0, 0.0]; // 0.5, 0.2, 0.2];
-const resting_sojourn = [20]; // time in minutes (initially 100)
-const foraging_sojourn = [20]; // initially 30 
-const active_sojourn = [20]; // initially 30
-
-// create a matrix with all available state vectors
-let all_states = ['resting', 'foraging', 'active'];
-let all_state_means = [resting_vector, foraging_vector, active_vector];
-let all_sojourn_times = [resting_sojourn, foraging_sojourn, active_sojourn];
+const stateDefaults = createDefaultStateConfig();
+const parameterNames = stateDefaults.parameterNames;
+const zero_vector = stateDefaults.zero_vector;
+let all_states = stateDefaults.all_states;
+let all_state_means = stateDefaults.all_state_means;
+let all_sojourn_times = stateDefaults.all_sojourn_times;
 
 // create state_means_matrix that contains the active vectors resting_vector, ...
-var state_means_matrix = [resting_vector];
-var states_present = ['resting']; // if more added by gui looks like ['resting', 'active', 'foraging']
-var substates = [[2]]; // number of initial substates for resting
-
-
+var state_means_matrix = stateDefaults.state_means_matrix;
+var states_present = stateDefaults.states_present; // if more added by gui looks like ['resting', 'active', 'foraging']
+var substates = stateDefaults.substates; // number of initial substates for resting
 
 // dwell time per state in minutes
-var sojourn_times = [resting_sojourn];  // dwell times for resting, foraging, active
-var transition_probs = [ //only initial
-    [0, 0.5, 0.5],  // probabilities from resting to resting, foraging, active
-    [0.5, 0, 0.5],  // probabilities from foraging to resting, foraging, active
-    [0.5, 0.5, 0]   // probabilities from active to resting, foraging, active
-];
+var sojourn_times = stateDefaults.sojourn_times;  // dwell times for resting, foraging, active
+var transition_probs = stateDefaults.transition_probs; //only initial
 
 var transition_matrix = calculateTransitionMatrix(transition_probs, sojourn_times, dt_output);
 
@@ -354,86 +344,22 @@ function time_passed_stamp(){
     HUDctx.fillText(timerText, HUDcanvas.width * 0.15 / 5, HUDcanvas.height*0.5);
 } 
 
-function rescaleToGeoJSON(x, y, z) {
-    // Scale the coordinates
-    let scaledX, scaledY;
-    if (x_as_max_extent) {
-        scaledX = (x)                                  / pixel_per_meter + geojson_xlimits_ori[0];
-        scaledY = (canvas.height - y + rescale_offset) / pixel_per_meter + geojson_ylimits_ori[0];
-    } else {
-        scaledX = (x - rescale_offset)                 / pixel_per_meter + geojson_xlimits_ori[0];
-        scaledY = (canvas.height - y)                  / pixel_per_meter + geojson_ylimits_ori[0];
-    }
-    const scaledZ = z / pixel_per_meter;
-    return [scaledX, scaledY, scaledZ];
+function rescaleToGeoJSONForDownload(x, y, z) {
+    return rescaleToGeoJSON(
+        x,
+        y,
+        z,
+        { width: canvas.width, height: canvas.height },
+        { pixel_per_meter, x_as_max_extent, rescale_offset },
+        {
+            minX: geojson_xlimits_ori[0],
+            minY: geojson_ylimits_ori[0],
+            maxX: geojson_xlimits_ori[1],
+            maxY: geojson_ylimits_ori[1],
+        }
+    );
 }
 
-// Function to rescale coordinates
-function rescaleCoordinates2D(coordinates) {
-    const minX = geojson_xlimits_ori[0];
-    const maxX = geojson_xlimits_ori[1];
-    const minY = geojson_ylimits_ori[0];
-    const maxY = geojson_ylimits_ori[1];
-    
-    // first adjust the width such that it fits to the canvas
-    pixel_per_meter = canvas.width / (maxX - minX);
-    x_as_max_extent = true;
-    rescale_offset = ( canvas.height - (maxY-minY)*pixel_per_meter) / 2;
-
-    // now check if the rescaled coordinates fit the height
-    // if True: keep the scale
-    // if False: recompute the scale using height
-    if ((maxY - minY) * pixel_per_meter > canvas.height) {
-        x_as_max_extent = false; // rescale y coordinates to fit the canvas height
-        pixel_per_meter = canvas.height / (maxY - minY);
-        rescale_offset = ( canvas.width - (maxX-minX)*pixel_per_meter ) /2;
-        
-        //shift x positions to centre
-        var rescaled_coords = coordinates.map(coord => [
-            (coord[0] - minX) * pixel_per_meter + rescale_offset,
-            canvas.height - (coord[1] - minY) * pixel_per_meter]);
-        
-    }else{
-        //otherwise shift Y positions to centre
-        var rescaled_coords = coordinates.map(coord => [
-            (coord[0] - minX) * pixel_per_meter,
-            canvas.height - ( (coord[1] - minY) * pixel_per_meter + rescale_offset ) ] );
-    }
-
-    geojson_scalebar_length = Math.round(((maxX-minX)*0.15)/10)*10;
-
-    
-    console.log("the canvas scale is (pixel_per_meter, xlen, ylen)",
-        pixel_per_meter, (maxX-minX), (maxY-minY));
-    return rescaled_coords;
-}
-
-// Function to rescale x,y,z coordinates
-function rescaleCoordinates3D(coordinates) {
-    const minX = geojson_xlimits_ori[0];
-    const maxX = geojson_xlimits_ori[1];
-    const minY = geojson_ylimits_ori[0];
-    const maxY = geojson_ylimits_ori[1];
-    
-    // ATTENTION: this function assumes that rescaleCoordinates2D was called before
-    // --> pixel_per_meter, x_as_max_extent, rescale_offset are already defined
-
-    if (x_as_max_extent) {
-        //shift y positions to centre
-        var rescaled_coords = coordinates.map(coord => [
-            (coord[0] - minX) * pixel_per_meter,
-            canvas.height - ( (coord[1] - minY) * pixel_per_meter + rescale_offset ),
-            coord[2] * pixel_per_meter ] );
-    } else {
-        //shift x positions to centre
-        var rescaled_coords = coordinates.map(coord => [
-            (coord[0] - minX) * pixel_per_meter + rescale_offset,
-            canvas.height - (coord[1] - minY) * pixel_per_meter,
-            coord[2] * pixel_per_meter ] );
-    }
-
-    return rescaled_coords;
-}
 
 function drawGeoJSON(geojson) {
     const features = geojson.features;
@@ -570,16 +496,12 @@ function TestGeoJSONFile() {
 
 function IntegrateGeoJSONShapeAndDepth() {
     // Convert geometry to LineString if it's not already
-    if (geojson.features.length > 0 && geojson.features[0].geometry.type !== 'LineString') {
-        const coordinates = geojson.features[0].geometry.coordinates[0];
-        geojson.features[0].geometry = {
-            type: 'LineString',
-            coordinates: coordinates
-        };
+    if (geojson.features.length > 0) {
+        normalizeToLineString(geojson.features[0]);
     }
 
     // get limits of the original GeoJSON
-    const bbox = calculateBbox(geojson)
+    const bbox = calculateBbox(geojson);
     geojson_xlimits_ori = [bbox[0], bbox[2]];
     geojson_ylimits_ori = [bbox[1], bbox[3]];
 
@@ -593,11 +515,24 @@ function IntegrateGeoJSONShapeAndDepth() {
     // Rescale coordinates if geometry is LineString
     const feature0 = geojson.features[0];
     if (feature0.geometry.type === 'LineString') {
-        feature0.geometry.coordinates = rescaleCoordinates2D(feature0.geometry.coordinates);
+        const rescaled = rescaleCoordinates2D(feature0.geometry.coordinates, {
+            width: canvas.width,
+            height: canvas.height,
+        }, {
+            minX: geojson_xlimits_ori[0],
+            minY: geojson_ylimits_ori[0],
+            maxX: geojson_xlimits_ori[1],
+            maxY: geojson_ylimits_ori[1],
+        });
+        feature0.geometry.coordinates = rescaled.coords;
+        pixel_per_meter = rescaled.pixel_per_meter;
+        x_as_max_extent = rescaled.x_as_max_extent;
+        rescale_offset = rescaled.rescale_offset;
+        geojson_scalebar_length = rescaled.scalebar_length;
     }
 
     // Compute limits
-    const limits = calculateMinMax_2D_matrix(feature0.geometry.coordinates);
+    const limits = calculateMinMax2D(feature0.geometry.coordinates);
     geojson_xlimits = [limits[0], limits[2]];
     geojson_ylimits = [limits[1], limits[3]];
     console.log(geojson_xlimits);
@@ -610,7 +545,17 @@ function IntegrateGeoJSONShapeAndDepth() {
         const feature1 = geojson.features[1];
         if (feature1.geometry.type === 'MultiPoint') {
             // depth map from MultiPoint geometry
-            feature1.geometry.coordinates = rescaleCoordinates3D(feature1.geometry.coordinates);
+            feature1.geometry.coordinates = rescaleCoordinates3D(
+                feature1.geometry.coordinates,
+                { width: canvas.width, height: canvas.height },
+                { pixel_per_meter, x_as_max_extent, rescale_offset },
+                {
+                    minX: geojson_xlimits_ori[0],
+                    minY: geojson_ylimits_ori[0],
+                    maxX: geojson_xlimits_ori[1],
+                    maxY: geojson_ylimits_ori[1],
+                }
+            );
             depthMapFromData(geojson);
             // const depthPoints = feature1.geometry.coordinates;
         } else {
@@ -678,73 +623,6 @@ function drawScaleBar(){
     HUDctx.fillStyle = 'white';   // Set text color
     HUDctx.textBaseline = 'middle'; // Align text vertically to the middle of the scale bar
     HUDctx.fillText(text, textX, textY); // Draw the text
-}
-
-// Function to compute the min and max values of a polygon
-function calculateMinMax_2D_matrix(polygon) {
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-    polygon.forEach(coord => {
-        minX = Math.min(minX, coord[0]);
-        minY = Math.min(minY, coord[1]);
-        maxX = Math.max(maxX, coord[0]);
-        maxY = Math.max(maxY, coord[1]);
-    });
-    return [minX, minY, maxX, maxY];
-}
-
-// function to get a specific column from a 2D array
-function getColumn(matrix, col) {
-    var coll = matrix.map(d => d[col]);
-    return coll;
-}
-
-function calculateBbox(thegeojson) {
-    let bbox = [Infinity, Infinity, -Infinity, -Infinity];
-    if (thegeojson.type === "FeatureCollection") {
-        thegeojson.features.forEach(feature => {
-            const coords = feature.geometry.coordinates;
-            if (feature.geometry.type === "Point") {
-                bbox[0] = Math.min(bbox[0], coords[0]);
-                bbox[1] = Math.min(bbox[1], coords[1]);
-                bbox[2] = Math.max(bbox[2], coords[0]);
-                bbox[3] = Math.max(bbox[3], coords[1]);
-            } else if (feature.geometry.type === "LineString" ||
-                       feature.geometry.type === "Polygon" ||
-                       feature.geometry.type === "MultiPoint") {
-                console.log("calculating bbox for", feature.geometry.type);
-                coords.forEach(coord => {
-                    bbox[0] = Math.min(bbox[0], coord[0]);
-                    bbox[1] = Math.min(bbox[1], coord[1]);
-                    bbox[2] = Math.max(bbox[2], coord[0]);
-                    bbox[3] = Math.max(bbox[3], coord[1]);
-                });
-            }
-        });
-    }
-    return bbox;
-}
-
-// function to calculate the intersection of two lines
-// base on https://en.wikipedia.org/wiki/Line%E2%80%93line_intersection
-// section "Given two points on each line segment"
-// idea: p1 = position, p2 = position + velocity * time_threshold
-//       p3 = polygon[i], p4 = polygon[i+1]
-function lineSegmentIntersection(p1, p2, p3, p4) {
-    const x1 = p1[0], y1 = p1[1];
-    const x2 = p2[0], y2 = p2[1];
-    const x3 = p3[0], y3 = p3[1];
-    const x4 = p4[0], y4 = p4[1];
-    var nominator = (x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4);
-    const denominator = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-    const t = nominator / denominator;
-    if ((t >= 0) && (t <= 1)) {
-        nominator = (x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3);
-        const u = - nominator / denominator;
-        if ((u >= 0) && (u <= 1)) {
-            return [t, x1 + t * (x2 - x1), y1 + t * (y2 - y1)];
-        }
-    }
-    return false
 }
 
 function makeFoodPatches(){
@@ -882,7 +760,7 @@ function downloadTracks() {
                 return [position[0], position[1], position[2], fish.timestamp[index]];
             } else {
                 // Rescale to GeoJSON coordinates
-                const originalCoord = rescaleToGeoJSON(position[0], position[1], position[2]);
+                const originalCoord = rescaleToGeoJSONForDownload(position[0], position[1], position[2]);
                 return [originalCoord[0], originalCoord[1], originalCoord[2], fish.timestamp[index]];
             }
         });
@@ -942,7 +820,7 @@ function downloadPoints() {
                 csvContent += point[0] + "," + point[1] + "," + point[2] + "," + point[3] + " \n";
             } else {
                 // Rescale to GeoJSON coordinates
-                const originalCoord = rescaleToGeoJSON(point[0], point[1], point[2]);
+                const originalCoord = rescaleToGeoJSONForDownload(point[0], point[1], point[2]);
                 csvContent += originalCoord[0] + "," + originalCoord[1] + "," + originalCoord[2] + "," + point[3] + "\n";
             }
         } else {
