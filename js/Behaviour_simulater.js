@@ -1102,5 +1102,5 @@ console.log("Result of draw_state_parameter_array:", arraytest);
 console.log("Result of draw_state_parameter_from_array:", drawStateParameterFromArray(arraytest, 0, env));
  */
 // Start animation loop for fish
-InitialGeoJSONFile("../FiMoS/data/Most_shoreline_polygon_UTM33.geojson");
+InitialGeoJSONFile("./data/Most_shoreline_polygon_UTM33.geojson");
 animateFish();
