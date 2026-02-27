@@ -1,6 +1,12 @@
 import fs from "fs";
 import path from "path";
 import { SimulationCore } from "../core/sim.mjs";
+import {
+  calculateDistanceToPolygon,
+  getMatrixIndicesAndPoints,
+  sampleDepthMap,
+  mapDepth,
+} from "../core/depth.mjs";
 
 function parseArgs(argv) {
   const args = new Map();
@@ -31,6 +37,9 @@ function usage() {
     "  --fish <n>         Number of fish (default: 0)",
     "  --width <n>        Viewport width (default: 1200)",
     "  --height <n>       Viewport height (default: 800)",
+    "  --build-depth      Build depth map in core (optional)",
+    "  --depth-res <n>    Depth resolution (default: 4)",
+    "  --max-depth <n>    Max depth for shore-distance mode (default: -8)",
     "  --out <path>       Output CSV file (default: stdout)",
     "  --help             Show this help",
   ].join("\n");
@@ -54,6 +63,9 @@ const fishCount = Number(args.get("fish") ?? 0);
 const width = Number(args.get("width") ?? 1200);
 const height = Number(args.get("height") ?? 800);
 const outPath = args.get("out");
+const buildDepth = Boolean(args.get("build-depth"));
+const depthResolution = Number(args.get("depth-res") ?? 4);
+const maxDepthArg = Number(args.get("max-depth") ?? -8);
 
 const resolvedPath = path.resolve(process.cwd(), geojsonPath);
 const geojson = JSON.parse(fs.readFileSync(resolvedPath, "utf-8"));
@@ -61,6 +73,39 @@ const geojson = JSON.parse(fs.readFileSync(resolvedPath, "utf-8"));
 const sim = new SimulationCore();
 sim.loadGeoJSON(geojson, { width, height });
 if (fishCount > 0) sim.resetFish(fishCount);
+
+if (buildDepth) {
+  let depth_map = [];
+  let depth_map_points_idxs = [];
+  let depth_points = [];
+  let maxDepth = maxDepthArg;
+
+  if (geojson.features.length > 1 && geojson.features[1].geometry.type === "MultiPoint") {
+    depth_map = sampleDepthMap(geojson, {
+      worldWidth: width,
+      worldHeight: height,
+      depthResolution,
+    });
+    [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map, depthResolution);
+    const flatDepths = depth_map.flat().filter(d => !Number.isNaN(d));
+    maxDepth = Math.min(...flatDepths);
+  } else {
+    const depthMatrix = calculateDistanceToPolygon(geojson, {
+      worldWidth: width,
+      worldHeight: height,
+      depthResolution,
+    });
+    depth_map = mapDepth(depthMatrix, maxDepth);
+    [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map, depthResolution);
+  }
+
+  sim.depth = {
+    depth_map,
+    depth_map_points_idxs,
+    depth_points,
+    maxDepth,
+  };
+}
 
 const rows = [];
 rows.push(["time", "fish_id", "x", "y", "z", "fish_state"].join(","));

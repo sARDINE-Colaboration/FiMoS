@@ -1,10 +1,23 @@
 import { SimulationCore } from "./core/sim.mjs";
 import { Fish, FoodPatch, randomNormal } from "./core/legacy_physics.mjs";
-
-// Include the source file (not sure if the best approach, but it works)
-const script_depth = document.createElement('script');
-script_depth.src = './js/depthMapFunctions.js';
-document.head.appendChild(script_depth);
+import {
+    calculateDistanceToPolygon,
+    getMatrixIndicesAndPoints,
+    sampleDepthMap,
+    mapDepth,
+    getDepthMapColors,
+    triangulateGround,
+    mapDepthPointIdxToTriangleStarts,
+} from "./core/depth.mjs";
+import {
+    generateTransitionProbs,
+    calculateTransitionMatrix,
+    drawStateParameters,
+    drawStateParameterArray,
+    drawStateParameterFromArray,
+    updateStateParameters,
+    stateSwitch,
+} from "./core/state.mjs";
 
 // Get the canvas element
 var canvas = document.getElementById("trailCanvas");
@@ -50,7 +63,7 @@ var maxDepth = -8;
 
 //maximum trajectory length
 //var max_iter = 10000;
-var depthResolution = 4; // used in depthMapFunctions.js
+var depthResolution = 4; // used in core depth module
 
 // Variable to store loaded shape data
 var geojson; // Declare the variable here
@@ -114,43 +127,7 @@ var transition_probs = [ //only initial
     [0.5, 0.5, 0]   // probabilities from active to resting, foraging, active
 ];
 
-function generateTransitionProbs(dimension) {
-    var transition_probs = new Array(dimension).fill(0).map(() => new Array(dimension).fill(0));
-    var prob = 1 / (dimension - 1);
-
-    for (var i = 0; i < dimension; i++) {
-        for (var j = 0; j < dimension; j++) {
-            if (i !== j) {
-                transition_probs[i][j] = prob;
-            }
-        }
-    }
-
-    return transition_probs;
-}
-
-function calculateTransitionMatrix(transition_probs, sojourn_times){
-    var prob_staying = [];
-    for (var state in transition_probs){
-        prob_staying[state] = 1 - (1 / (sojourn_times[state] * 60 / dt_output)); // sojourn time in dt_output units
-    }
-    var transition_matrix = [];
-    for (var state in transition_probs){
-        var probs = transition_probs[state];
-        var row = [];
-        for (var next_state in probs){
-            if (next_state == state){
-                row.push(prob_staying[state]);
-            }
-            else{
-                row.push((1-prob_staying[state])*probs[next_state]);
-            }
-        }
-        transition_matrix.push(row);
-    }
-    return transition_matrix;
-}
-var transition_matrix = calculateTransitionMatrix(transition_probs, sojourn_times);
+var transition_matrix = calculateTransitionMatrix(transition_probs, sojourn_times, dt_output);
 
 //see gui menu at bottom of script for global stdev variable
 
@@ -173,72 +150,23 @@ const env = {
     get depthResolution() { return depthResolution; },
     get geojson() { return geojson; },
     get food_patch_update_time() { return food_patch_update_time; },
-    draw_state_parameter_array: () => draw_state_parameter_array(states_present),
-    draw_state_parameter_from_array: (arr, state) => draw_state_parameter_from_array(arr, state),
+    get state_means_matrix() { return state_means_matrix; },
+    get lower_limits() { return lower_limits; },
+    get upper_limits() { return upper_limits; },
+    get substates() { return substates; },
+    get param() { return param; },
+    get states_present() { return states_present; },
+    get transition_matrix() { return transition_matrix; },
+    draw_state_parameter_array: () => drawStateParameterArray(states_present, env),
+    draw_state_parameter_from_array: (arr, state) => drawStateParameterFromArray(arr, state, env),
     zero_vector: zero_vector,
 };
 
 const simCore = new SimulationCore({ dt, dt_output }, Math.random);
 
-class Vector extends Array {
-    add(other) {
-      return this.map((e, i) => e + other[i]);
-    }
-    sub(other) {
-        return this.map((e, i) => e - other[i]);
-    }
-    mul(other) {
-      return this.map((e, i) => e * other[i]);
-    }
-    div(other) {
-      return this.map((e, i) => e / other[i]);
-    }
-    dot(other) {
-        return this.reduce((total, current, i) => total + current * other[i], 0);
-    }
-    add_scalar(scalar) {
-      return this.map(e => e + scalar);
-    }
-    mul_scalar(scalar) {
-      return this.map(e => e * scalar);
-    }
-    div_scalar(scalar) {
-      return this.map(e => e / scalar);
-    }
-    sum() {
-        return this.reduce((total, current) => total + current, 0);
-    }
-    norm() {
-        const sumOfSquares = this.reduce((total, current) => total + current ** 2, 0);
-        return Math.sqrt(sumOfSquares);
-    }
-    normXY() {
-        return Math.sqrt(this[0] ** 2 + this[1] ** 2);
-    }
-    phi() {
-        return Math.atan2(this[1], this[0]);
-    }
-    theta() {
-        return Math.atan2(this.normXY(), this[2]);
-    }
-    u_v() {
-        return this.div_scalar(this.norm());
-    }
-    u_phi() {
-        const phi = this.phi();
-        const sin_theta = Math.sin(this.theta());
-        return [-Math.sin(phi) * sin_theta, Math.cos(phi) * sin_theta, 0];
-    }
-    u_theta() {
-        const phi = this.phi();
-        const theta = this.theta();
-        return [Math.cos(phi) * Math.cos(theta), Math.sin(phi) * Math.cos(theta), - Math.cos(theta)];
-    }
-  }
-
 // lower and upper limits of state-parameters: beta, v0, D_phi, D_theta, D_v, patch_strength
-var lower_limits = new Vector(0.1, 0.01, 0.01, 0.01, 0.01, 0, 0, 0);
-var upper_limits = new Vector(3,   3,    1.,   1,    1, 10, 5, 5);
+const lower_limits = [0.1, 0.01, 0.01, 0.01, 0.01, 0, 0, 0];
+const upper_limits = [3, 3, 1, 1, 1, 10, 5, 5];
 
 
 // state = 0; // first ticked state (initially resting)
@@ -250,98 +178,6 @@ var upper_limits = new Vector(3,   3,    1.,   1,    1, 10, 5, 5);
 // patch_strength = 0.2; // attraction to food patches
 // strength_att = 0.2; // strength of attraction force
 // strength_align = 0.2; // strength of alignment force
-
-// Function to switch state
-function state_switch(fish){
-    if (states_present.length <= 1) {
-        // Only one state, no transition needed
-        // or no states selected --> no transition
-        return;
-    }
-    var state = fish.state;
-    var new_state = state;
-    var probs = transition_matrix[state];
-    var ran = Math.random();
-    var cumulative_prob = 0;
-    for (var i = 0; i < probs.length; i++) {
-        cumulative_prob += probs[i];
-        if (ran < cumulative_prob) {
-            new_state = i;
-            break;
-        }
-    }
-    if (new_state != fish.state) {
-    updateStateParameters(fish, new_state);
-    }
-}
-
-// function to update the state-dependent parameters of a fish
-function updateStateParameters(fish, new_state) {
-    if (fish.parameter_array.length > 0) {
-        var new_parameters = draw_state_parameter_from_array(fish.parameter_array, new_state);
-        fish.state = new_state;
-        fish.beta = new_parameters[0];
-        fish.v0 = new_parameters[1];
-        fish.D_phi = new_parameters[2];
-        fish.D_theta = new_parameters[3];
-        fish.D_v = new_parameters[4];
-        fish.patch_strength = new_parameters[5];
-        fish.strength_att = new_parameters[6];
-        fish.strength_align = new_parameters[7];
-    }
-    else {
-        fish.v0 = 0;
-        fish.D_phi = 0;
-        fish.D_theta = 0;
-        fish.D_v = 0;
-        fish.patch_strength = 0;
-        fish.strength_att = 0;
-        fish.strength_align = 0;
-    }
-}
-
-// draw from normal dist using state_means and range(limits)*global_stdev for each fish
-function draw_state_parameters(state){
-    if (state in state_means_matrix) {
-        var parameterVector = new Vector(...state_means_matrix[state].map(mean => {
-            var result = randomNormal(mean, param.globalStateStdev);
-            return result;
-        }));
-        parameterVector = parameterVector.map(value => Math.max(0, Math.min(1, value)));      
-        parameterVector = parameterVector.mul(upper_limits.sub(lower_limits)).add(lower_limits);
-        return parameterVector;
-    }
-    else {
-        console.log("state not in dictionary");
-        return false;
-    }
-}
-
-// draw as many state vectors as there are substates for each (resting, foraging, active)
-function draw_state_parameter_array(states_present){
-    var state_param_array = [];
-    for (var state in states_present){
-        state_param_array[state] = [];
-        for (let i = 0; i < substates[state]; i++) {
-            // Call draw_state_parameters to generate a vector
-            let state_param_vector = draw_state_parameters(state);
-            // Add the generated vector to state_param_array
-            state_param_array[state].push(state_param_vector);
-        }
-    }
-    return state_param_array;
-}
-
-// draw one of the state vectors from the state_param_array
-function draw_state_parameter_from_array(state_param_array, state){
-    // prevent error if state_param_array is empty
-    if (state_param_array.length == 0){
-        return zero_vector;
-    }
-    // if not empty, draw a random vector from the array
-    var index = Math.floor(Math.random() * substates[state]);
-      return state_param_array[state][index];
-}
 
 // Fish class
 // ATTENTION:
@@ -459,7 +295,7 @@ function animateFish() {
     fishes.forEach(function (fish) {
         fish.recordState(param.maxIter);
         drawFish(fish);
-        state_switch(fish); // switch state before updating position
+        stateSwitch(fish, env); // switch state before updating position
     });
     time_passed_stamp();
     drawScaleBar();
@@ -631,10 +467,37 @@ function drawLineString(coordinates) {
     ctx.stroke();
 }
 
+function makeDepthMapImageData(colors) {
+    const rotatedColors = colors;
+    const ctxLocal = canvas.getContext('2d');
+    const width = canvas.width;
+    const height = canvas.height;
+    const imgData = ctxLocal.createImageData(width, height);
+    const scaleX = rotatedColors[0].length / width;
+    const scaleY = rotatedColors.length / height;
+
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const color = rotatedColors[Math.floor(y * scaleY)][Math.floor(x * scaleX)];
+            const index = (y * width + x) * 4;
+            imgData.data[index] = color[0];
+            imgData.data[index + 1] = color[1];
+            imgData.data[index + 2] = color[2];
+            imgData.data[index + 3] = color[3];
+        }
+    }
+
+    return imgData;
+}
+
 function depthMapFromData(geojson) {
     // get a grid detailed depth map with depthResolution as grid-distance
-    depth_map = sample_depth_map(geojson);
-    [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map);
+    depth_map = sampleDepthMap(geojson, {
+        worldWidth: canvas.width,
+        worldHeight: canvas.height,
+        depthResolution,
+    });
+    [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map, depthResolution);
     const flatDepths = depth_map.flat().filter(d => !isNaN(d));
     maxDepth = Math.min(...flatDepths);
 }
@@ -642,10 +505,14 @@ function depthMapFromData(geojson) {
 function depthMapFromShoreDistance(geojson) {
     maxDepth = maxDepth_ori * pixel_per_meter; // reset the maxDepth to the original value
     // depth map
-    const depthMatrix = calculateDistanceToPolygon(geojson);
-    depth_map = mapDepth(depthMatrix);
-    [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map)
-    depth_map_colours = getDepthMapColors(depth_map);
+    const depthMatrix = calculateDistanceToPolygon(geojson, {
+        worldWidth: canvas.width,
+        worldHeight: canvas.height,
+        depthResolution,
+    });
+    depth_map = mapDepth(depthMatrix, maxDepth);
+    [depth_map_points_idxs, depth_points] = getMatrixIndicesAndPoints(depth_map, depthResolution);
+    depth_map_colours = getDepthMapColors(depth_map, maxDepth);
     renderedDepth = makeDepthMapImageData(depth_map_colours);
 }
 
@@ -753,11 +620,12 @@ function IntegrateGeoJSONShapeAndDepth() {
         depthMapFromShoreDistance(geojson); 
     }
     // color the ground
-    depth_map_colours = getDepthMapColors(depth_map);
+    depth_map_colours = getDepthMapColors(depth_map, maxDepth);
     renderedDepth = makeDepthMapImageData(depth_map_colours);
     // triangulate the ground
     depth_points_length = depth_points.length;
-    [depth_points, triangles] = triangulate_ground(depth_points, feature0.geometry.coordinates);
+    const delaunay = window.d3 && window.d3.Delaunay ? window.d3.Delaunay : null;
+    [depth_points, triangles] = triangulateGround(depth_points, feature0.geometry.coordinates, depthResolution, delaunay);
     depth_point_idx_to_triangle_starts = mapDepthPointIdxToTriangleStarts(depth_points_length, triangles);
 
     //make new food patches
@@ -1175,18 +1043,18 @@ function manageStateChecking(stateName, vector, sojourn, substate, include) {
     // Update transition_probs and transition_matrix
     var dimension = states_present.length;
     transition_probs = generateTransitionProbs(dimension);
-    transition_matrix = calculateTransitionMatrix(transition_probs, sojourn_times);
+    transition_matrix = calculateTransitionMatrix(transition_probs, sojourn_times, dt_output);
 
     // Update fish.parameter_array with the new states_present
         fishes.forEach(function (fish) {
-            fish.parameter_array = draw_state_parameter_array(states_present);
+            fish.parameter_array = drawStateParameterArray(states_present, env);
         }); 
 
     if ( (!include) || (N_states_present_before_switch == 0)) {
       // update fish to be in state 0 if a state is removed
       // or if no state was present before
         fishes.forEach(function (fish) {
-           updateStateParameters(fish, 0);
+           updateStateParameters(fish, 0, env);
            });
          }; 
         
@@ -1202,7 +1070,7 @@ function updateSubstateEntry(stateName, newNumberSubstates) {
             fish.parameter_array[state] = [];
             for (let i = 0; i < substates[state]; i++) {
                 // Call draw_state_parameters to generate a vector
-                let state_param_vector = draw_state_parameters(state);
+                let state_param_vector = drawStateParameters(state, env);
                 // Add the generated vector to parameter_array
                 fish.parameter_array[state].push(state_param_vector);
             }
@@ -1226,8 +1094,8 @@ function adjustStateParameters(folder, state) {
                     adjustedState[index] = parsedValue;
                 }
                 fishes.forEach(function (fish) {
-                    fish.parameter_array = draw_state_parameter_array(states_present);
-                    updateStateParameters(fish, 0);
+                    fish.parameter_array = drawStateParameterArray(states_present, env);
+                    updateStateParameters(fish, 0, env);
                 });
             });
     });
@@ -1248,7 +1116,7 @@ function adjustStateParameters(folder, state) {
             // Update transition_probs and transition_matrix
             var dimension = states_present.length;
             transition_probs = generateTransitionProbs(dimension);
-            transition_matrix = calculateTransitionMatrix(transition_probs, sojourn_times);
+            transition_matrix = calculateTransitionMatrix(transition_probs, sojourn_times, dt_output);
         });
 }
 
@@ -1337,23 +1205,23 @@ gui.add(param, "download").name('Download tracks');
 gui.add(param, "downloadTriangles").name('Download basin (pixel coord.)');
 geoJSONFileInput.addEventListener('change', handleGeoJSONFile);
 
-/* console.log("Resting state parameters:", draw_state_parameters(0));
+/* console.log("Resting state parameters:", drawStateParameters(0, env));
 // Test state_switch function
-const testFish = new Fish(1, geojson);
+const testFish = new Fish(1, env, geojson);
 console.log("Initial state:", testFish.state);
 console.log("Initial parameters:", testFish.beta, testFish.v0, testFish.D_phi, testFish.D_theta, testFish.D_v);
 
-state_switch(testFish);
+stateSwitch(testFish, env);
 console.log("After state switch:");
 console.log("New state:", testFish.state);
 console.log("New parameters:", testFish.beta, testFish.v0, testFish.D_phi, testFish.D_theta, testFish.D_v);
 
 
-var arraytest = draw_state_parameter_array(states_present);
-// Call the draw_state_parameter_array function with the states_present array
+var arraytest = drawStateParameterArray(states_present, env);
+// Call the drawStateParameterArray function with the states_present array
 console.log("Result of draw_state_parameter_array:", arraytest);
-// call result of function draw_state_parameter_from_array
-console.log("Result of draw_state_parameter_from_array:", draw_state_parameter_from_array(arraytest, 0));
+// call result of function drawStateParameterFromArray
+console.log("Result of draw_state_parameter_from_array:", drawStateParameterFromArray(arraytest, 0, env));
  */
 // Start animation loop for fish
 InitialGeoJSONFile("../FiMoS/data/Most_shoreline_polygon_UTM33.geojson");
