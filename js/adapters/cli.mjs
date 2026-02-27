@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 import { SimulationCore } from "../core/sim.mjs";
-import { Fish, FoodPatch } from "../core/legacy_physics.mjs";
+import { Fish, FoodPatch } from "../core/physics.mjs";
 import {
   calculateDistanceToPolygon,
   getMatrixIndicesAndPoints,
@@ -83,6 +83,7 @@ const outPath = args.get("out");
 const depthResolution = Number(args.get("depth-res") ?? 4);
 const maxDepthArg = Number(args.get("max-depth") ?? -8);
 const stateConfigPath = args.get("state-config");
+const useStateConfig = Boolean(stateConfigPath);
 
 const resolvedPath = path.resolve(process.cwd(), geojsonPath);
 const geojson = JSON.parse(fs.readFileSync(resolvedPath, "utf-8"));
@@ -241,6 +242,23 @@ for (let i = 0; i < 5; i++) {
 
 for (let i = 0; i < fishCount; i++) {
   fishes.push(new Fish(i, env, geojson));
+}
+
+if (useStateConfig && fishes.length > 0) {
+  fishes.forEach(fish => {
+    const randomState = Math.floor(Math.random() * states_present.length);
+    fish.parameter_array = drawStateParameterArray(states_present, env);
+    fish.state = randomState;
+    const newParams = drawStateParameterFromArray(fish.parameter_array, fish.state, env);
+    fish.beta = newParams[0];
+    fish.v0 = newParams[1];
+    fish.D_phi = newParams[2];
+    fish.D_theta = newParams[3];
+    fish.D_v = newParams[4];
+    fish.patch_strength = newParams[5];
+    fish.strength_att = newParams[6];
+    fish.strength_align = newParams[7];
+  });
 }
 
 const rows = [];

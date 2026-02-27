@@ -6,7 +6,7 @@ import {
   getTrianglesFromPointIndices,
   getTriangleCoords,
   lineIntersectsTriangle_ppk,
-} from "./depth_legacy.mjs";
+} from "./collision.mjs";
 
 export function randomNormal(mean, sd) {
   const u = 1 - Math.random();

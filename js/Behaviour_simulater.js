@@ -1,5 +1,5 @@
 import { SimulationCore } from "./core/sim.mjs";
-import { Fish, FoodPatch, randomNormal } from "./core/legacy_physics.mjs";
+import { Fish, FoodPatch, randomNormal } from "./core/physics.mjs";
 import {
     calculateDistanceToPolygon,
     getMatrixIndicesAndPoints,

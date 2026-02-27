@@ -1,6 +1,6 @@
 import { Fish } from "./fish.mjs";
 import { calculateBbox } from "./geo.mjs";
-import { computeDistMatrixSparse } from "./legacy_physics.mjs";
+import { computeDistMatrixSparse } from "./physics.mjs";
 
 export class SimulationCore {
   constructor(config = {}, rng = Math.random, hooks = {}) {
