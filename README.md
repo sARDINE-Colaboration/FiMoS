@@ -22,7 +22,19 @@ node js/adapters/cli.mjs \
   --out out_tracks.csv
 ```
 
-Output format: `time,fish_id,x,y,z,fish_state`.
+Default output format (tracks): `Fish ID,X,Y,Z,Timestamp`.
+
+Optional: output tracks and lake triangles in pixel coordinates:
+
+```bash
+node js/adapters/cli.mjs \
+  --geojson data/Most_shoreline_polygon_UTM33.geojson \
+  --steps 5 \
+  --fish 10 \
+  --pixel-format \
+  --out out_tracks_pixels.csv \
+  --out-lake lake_triangulated_pixels.csv
+```
 
 ### Optional State Config
 
@@ -66,6 +78,39 @@ node js/adapters/cli.mjs \
   --fish 10 \
   --state-config input_state.json \
   --out out_tracks.csv
+```
+
+Optional: write GUI-style state CSV:
+
+```bash
+node js/adapters/cli.mjs \
+  --geojson data/Most_shoreline_polygon_UTM33.geojson \
+  --steps 5 \
+  --fish 10 \
+  --out out_tracks.csv \
+  --out-states out_states.csv
+```
+
+Optional: write triangulated lake basin CSV (pixel coordinates):
+
+```bash
+node js/adapters/cli.mjs \
+  --geojson data/Most_shoreline_polygon_UTM33.geojson \
+  --steps 5 \
+  --fish 10 \
+  --out out_tracks.csv \
+  --out-lake lake_triangulated.csv
+```
+
+Optional: write debug points CSV (from collision checks):
+
+```bash
+node js/adapters/cli.mjs \
+  --geojson data/Most_shoreline_polygon_UTM33.geojson \
+  --steps 5 \
+  --fish 10 \
+  --out out_tracks.csv \
+  --out-debug-points debug_points.csv
 ```
 
 ## Run GUI (Local Server)

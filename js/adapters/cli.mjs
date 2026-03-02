@@ -15,7 +15,14 @@ import {
   normalizeToLineString,
   rescaleCoordinates2D,
   rescaleCoordinates3D,
+  rescaleToGeoJSON,
 } from "../core/geo.mjs";
+import {
+  buildTracksCsvFromRows,
+  buildStatesCsv,
+  buildLakeTrianglesCsv,
+  buildDebugPointsCsvFromRows,
+} from "../core/exporters.mjs";
 import {
   calculateTransitionMatrix,
   drawStateParameterArray,
@@ -57,6 +64,10 @@ function usage() {
     "  --depth-res <n>    Depth resolution (default: 4)",
     "  --max-depth <n>    Max depth for shore-distance mode (default: -8)",
     "  --state-config <path>  JSON state config file with state_vectors (optional)",
+    "  --out-states <path>    Write GUI-style state CSV to this file (optional)",
+    "  --out-lake <path>      Write triangulated basin CSV to this file (optional)",
+    "  --out-debug-points <path>  Write debug points CSV to this file (optional)",
+    "  --pixel-format         Output tracks/lake in pixel coordinates (optional)",
     "  --out <path>       Output CSV file (default: stdout)",
     "  --help             Show this help",
   ].join("\n");
@@ -83,6 +94,10 @@ const outPath = args.get("out");
 const depthResolution = Number(args.get("depth-res") ?? 4);
 const maxDepthArg = Number(args.get("max-depth") ?? -8);
 const stateConfigPath = args.get("state-config");
+const outStatesPath = args.get("out-states");
+const outLakePath = args.get("out-lake");
+const outDebugPointsPath = args.get("out-debug-points");
+const pixelFormat = Boolean(args.get("pixel-format"));
 const useStateConfig = Boolean(stateConfigPath);
 
 const resolvedPath = path.resolve(process.cwd(), geojsonPath);
@@ -261,22 +276,81 @@ if (useStateConfig && fishes.length > 0) {
   });
 }
 
-const rows = [];
-rows.push(["time", "fish_id", "x", "y", "z", "fish_state"].join(","));
 for (let i = 0; i < steps; i++) {
   env.food_patches.forEach(patch => patch.updatePatch());
-  const snapshot = sim.stepLegacy(env, geojson.features[0].geometry.coordinates);
+  sim.stepLegacy(env, geojson.features[0].geometry.coordinates);
   env.fishes.forEach(fish => {
-    const [x, y, z] = fish.position;
-    rows.push([snapshot.time, fish.id, x, y, z, fish.state].join(","));
-  });
-  env.fishes.forEach(fish => {
+    fish.recordState(Number.MAX_SAFE_INTEGER);
     stateSwitch(fish, env);
   });
 }
-const serialized = rows.join("\n");
+
+const trackRows = [];
+env.fishes.forEach((fish, fishIndex) => {
+  fish.positions.forEach((position, idx) => {
+    const timestamp = fish.timestamp[idx];
+    const originalCoord = pixelFormat
+      ? [position[0], position[1], position[2]]
+      : rescaleToGeoJSON(
+          position[0],
+          position[1],
+          position[2],
+          { width, height },
+          rescaleState,
+          geojsonLimits
+        );
+    trackRows.push([
+      fishIndex + 1,
+      originalCoord[0],
+      originalCoord[1],
+      originalCoord[2],
+      timestamp,
+    ]);
+  });
+});
+
+const tracksSerialized = buildTracksCsvFromRows(trackRows);
 if (outPath) {
-  fs.writeFileSync(path.resolve(process.cwd(), outPath), serialized);
+  fs.writeFileSync(path.resolve(process.cwd(), outPath), tracksSerialized);
 } else {
-  console.log(serialized);
+  console.log(tracksSerialized);
+}
+
+if (outStatesPath) {
+  const statesSerialized = buildStatesCsv(env.fishes);
+  fs.writeFileSync(path.resolve(process.cwd(), outStatesPath), statesSerialized);
+}
+
+if (outLakePath) {
+  const lakePoints = pixelFormat
+    ? triangulated_points
+    : triangulated_points.map(point =>
+        rescaleToGeoJSON(
+          point[0],
+          point[1],
+          point[2],
+          { width, height },
+          rescaleState,
+          geojsonLimits
+        )
+      );
+  const lakeSerialized = buildLakeTrianglesCsv(triangles, lakePoints);
+  fs.writeFileSync(path.resolve(process.cwd(), outLakePath), lakeSerialized);
+}
+
+if (outDebugPointsPath) {
+  const debugRows = env.points_to_draw.map(point => {
+    if (pixelFormat) return [point[0], point[1], point[2], point[3]];
+    const originalCoord = rescaleToGeoJSON(
+      point[0],
+      point[1],
+      point[2],
+      { width, height },
+      rescaleState,
+      geojsonLimits
+    );
+    return [originalCoord[0], originalCoord[1], originalCoord[2], point[3]];
+  });
+  const debugSerialized = buildDebugPointsCsvFromRows(debugRows);
+  fs.writeFileSync(path.resolve(process.cwd(), outDebugPointsPath), debugSerialized);
 }

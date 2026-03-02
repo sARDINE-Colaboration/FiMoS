@@ -26,6 +26,12 @@ import {
     rescaleCoordinates3D,
     rescaleToGeoJSON,
 } from "./core/geo.mjs";
+import {
+    buildTracksCsvFromRows,
+    buildStatesCsv,
+    buildLakeTrianglesCsv,
+    buildDebugPointsCsvFromRows,
+} from "./core/exporters.mjs";
 import { createDefaultStateConfig } from "./core/defaults.mjs";
 
 // Get the canvas element
@@ -683,18 +689,8 @@ function applyPositioningError(tracks, errorProbHigh, errorSDHigh, errorSDLow) {
 }
 
 function downloadTriangles() {
-    // Create CSV content for triangles
-    let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "triangle_id,point_1_x,point_1_y,point_1_z,point_2_x,point_2_y,point_2_z,point_3_x,point_3_y,point_3_z\n";
-    for (let i = 0; i < triangles.length; i+=3){
-        const triangle = triangles.slice(i, i + 3);
-        const point1 = depth_points[triangle[0]];
-        const point2 = depth_points[triangle[1]];
-        const point3 = depth_points[triangle[2]];
-        csvContent += `${i/3 + 1},${point1[0]},${point1[1]},${point1[2]},${point2[0]},${point2[1]},${point2[2]},${point3[0]},${point3[1]},${point3[2]}\n`;
-    };
-    // Create a link element and trigger download
-    const encodedUri = encodeURI(csvContent);
+    const csvBody = buildLakeTrianglesCsv(triangles, depth_points);
+    const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvBody);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", "triangles.csv");
@@ -709,27 +705,8 @@ function downloadData() {
 }
 
 function downloadStates() {
-
-    const stateSwitches = fishes.map(fish => {
-        return fish.states.map((state, index) => {
-            return [state, fish.timestamp_states[index],
-                    fish.parameters[index][0], fish.parameters[index][1], fish.parameters[index][2], fish.parameters[index][3], 
-                    fish.parameters[index][4], fish.parameters[index][5], fish.parameters[index][6], fish.parameters[index][7],
-                    fish.parameters[index][8]];
-        });
-    });
-
-    // Create CSV content
-    let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Fish ID,state,Timestamp,beta,v0,D_phi,D_theta,D_v,patch_strength,patch_dist,social_strength,social_align\n";
-    stateSwitches.forEach((stateRecord, fishIndex) => {
-        stateRecord.forEach(row => {
-            csvContent += (fishIndex + 1) + "," + row[0] + "," + row[1] + "," + row[2] + "," + row[3] + "," + row[4] + "," + row[5] + "," + row[6] + "," + row[7] + "," + row[8] + "," + row[9] + "," + row[10] + "\n";
-        });
-    });
-
-    // Create a link element and trigger download
-    const encodedUri = encodeURI(csvContent);
+    const csvBody = buildStatesCsv(fishes);
+    const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvBody);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", "fish_states.csv");
@@ -780,17 +757,14 @@ function downloadTracks() {
     // Remove undefined tracks
     processedTracks = processedTracks.filter(track => track && track.length);
 
-    // Create CSV content
-    let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "Fish ID,X,Y,Z,Timestamp\n";
+    const trackRows = [];
     processedTracks.forEach((track, fishIndex) => {
         track.forEach(row => {
-            csvContent += (fishIndex + 1) + "," + row[0] + "," + row[1] + "," + row[2] + "," + row[3] + "\n";
+            trackRows.push([fishIndex + 1, row[0], row[1], row[2], row[3]]);
         });
     });
-
-    // Create a link element and trigger download
-    const encodedUri = encodeURI(csvContent);
+    const csvBody = buildTracksCsvFromRows(trackRows);
+    const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvBody);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", "fish_tracks.csv");
@@ -809,27 +783,21 @@ function downloadPoints() {
     const outPixelCoordinates = param.outPixelCoordinates;
     console.log('Downloading points in pixel coordinates:', outPixelCoordinates);
 
-    // Create CSV content
-    let csvContent = "data:text/csv;charset=utf-8,";
-    csvContent += "X,Y,Z,debugFlag\n";
-    
+    const debugRows = [];
     points_to_draw.forEach(point => {
         if (point.length >= 3) {
             if (outPixelCoordinates) {
-                // Output pixel coordinates directly
-                csvContent += point[0] + "," + point[1] + "," + point[2] + "," + point[3] + " \n";
+                debugRows.push([point[0], point[1], point[2], point[3]]);
             } else {
-                // Rescale to GeoJSON coordinates
                 const originalCoord = rescaleToGeoJSONForDownload(point[0], point[1], point[2]);
-                csvContent += originalCoord[0] + "," + originalCoord[1] + "," + originalCoord[2] + "," + point[3] + "\n";
+                debugRows.push([originalCoord[0], originalCoord[1], originalCoord[2], point[3]]);
             }
         } else {
             console.warn("Invalid point in points_to_draw:", point);
         }
     });
-
-    // Create a link element and trigger download
-    const encodedUri = encodeURI(csvContent);
+    const csvBody = buildDebugPointsCsvFromRows(debugRows);
+    const encodedUri = encodeURI("data:text/csv;charset=utf-8," + csvBody);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     link.setAttribute("download", "debug_points.csv");
