@@ -312,7 +312,8 @@ export class Fish {
     this.theta = Math.PI / 2;
     this.turn_phi = 2;
     this.turn_theta = 5;
-    this.state = 0;
+    const nPresentStates = Array.isArray(env.states_present) ? env.states_present.length : 0;
+    this.state = nPresentStates > 0 ? Math.floor(Math.random() * nPresentStates) : 0;
     this.parameter_array = env.draw_state_parameter_array ? env.draw_state_parameter_array(env) : [];
     const initial_parameters = env.draw_state_parameter_from_array
       ? env.draw_state_parameter_from_array(this.parameter_array, this.state, env)
